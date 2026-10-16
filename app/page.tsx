@@ -6,9 +6,9 @@ import { sportSlug } from '../lib/data';
 
 const tiles = [
   {
-    name: 'Football',
-    image: 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=85',
-  },
+  name: 'Football',
+  image: '/football-category.png',
+},
   {
   name: 'Formula 1',
   image: '/formula-1-category.png',
