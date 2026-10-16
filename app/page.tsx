@@ -22,9 +22,9 @@ const tiles = [
   image: '/tennis-category.png',
 },
   {
-    name: 'Other Events',
-    image: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=900&q=85',
-  },
+  name: 'Other Events',
+  image: '/other-events-category.png',
+},
 ];
 
 export default function Home() {
