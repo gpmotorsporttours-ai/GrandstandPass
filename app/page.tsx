@@ -14,9 +14,9 @@ const tiles = [
   image: '/formula-1-category.png',
 },
   {
-    name: 'MotoGP',
-    image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=900&q=85',
-  },
+  name: 'MotoGP',
+  image: '/motogp-category.png',
+},
   {
   name: 'Tennis',
   image: '/tennis-category.png',
