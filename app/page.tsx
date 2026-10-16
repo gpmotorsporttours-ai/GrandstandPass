@@ -10,9 +10,9 @@ const tiles = [
     image: 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=85',
   },
   {
-    name: 'Formula 1',
-    image: 'https://images.unsplash.com/photo-1504817343863-5092a923803e?auto=format&fit=crop&w=900&q=85',
-  },
+  name: 'Formula 1',
+  image: '/formula-1-category.png',
+},
   {
     name: 'MotoGP',
     image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=900&q=85',
