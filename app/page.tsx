@@ -1,3 +1,119 @@
-import Link from 'next/link';import {ArrowRight,Search,ChevronRight} from 'lucide-react';import EventBrowser from '../components/EventBrowser';import {sports,sportSlug} from '../lib/data';
-const tiles=[{name:'Football',image:'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=85'},{name:'Formula 1',image:'https://images.unsplash.com/photo-1504817343863-5092a923803e?auto=format&fit=crop&w=900&q=85'},{name:'MotoGP',image:'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=900&q=85'},{name:'Tennis',image:'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?auto=format&fit=crop&w=900&q=85'},{name:'Other Events',image:'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=900&q=85'}];
-export default function Home(){return <><section className="relative min-h-[490px] flex items-center bg-navy text-white overflow-hidden"><img src="https://images.unsplash.com/photo-1504817343863-5092a923803e?auto=format&fit=crop&w=2000&q=90" alt="Motorsport atmosphere" className="absolute inset-0 w-full h-full object-cover opacity-40"/><div className="absolute inset-0 bg-gradient-to-r from-navy via-[#0b2042db] to-transparent"/><div className="container-wide relative w-full py-20"><div className="max-w-2xl"><span className="inline-block bg-white/15 rounded-full px-4 py-2 text-xs font-bold tracking-wider uppercase mb-6">Your pass to the world's best sport</span><h1 className="text-4xl md:text-6xl font-black tracking-tight leading-tight">Experience the world's greatest <span className="text-[#66a6ff]">sporting events.</span></h1><p className="text-lg text-slate-200 mt-6 max-w-lg">Discover unforgettable matches, races and tournaments. Find your event and explore ticket options in one place.</p><div className="flex flex-wrap gap-3 mt-8"><Link className="btn-primary" href="/#events">Explore events <ArrowRight size={17}/></Link><Link className="border border-white/50 rounded-lg px-6 py-3 font-bold hover:bg-white/10" href="/football">Browse football</Link></div></div></div></section><section className="container-wide py-14"><div className="eyebrow mb-2">Something for every fan</div><h2 className="section-title mb-7">Browse by sport</h2><div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">{tiles.map(tile=><Link key={tile.name} href={tile.name==='Football'?'/football':'/sport/'+sportSlug(tile.name)} className="relative h-44 md:h-52 rounded-xl overflow-hidden group"><img className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" src={tile.image} alt={tile.name}/><div className="absolute inset-0 bg-gradient-to-t from-[#051934e8] via-transparent to-transparent"/><div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white font-extrabold"><span>{tile.name}</span><ChevronRight size={18}/></div></Link>)}</div></section><div className="container-wide"><EventBrowser/></div><section className="bg-navy text-white"><div className="container-wide py-16 flex flex-col md:flex-row justify-between items-center gap-7"><div><div className="eyebrow text-blue-300 mb-2">Make it unforgettable</div><h2 className="text-3xl font-black">Every moment starts with a ticket.</h2><p className="text-slate-300 mt-2">Explore events around the globe with Grandstand Pass.</p></div><Link className="btn-primary shrink-0" href="/#events">Find an event <ArrowRight size={17}/></Link></div></section></>}
+
+import Link from 'next/link';
+import { ArrowRight, ChevronRight } from 'lucide-react';
+import EventBrowser from '../components/EventBrowser';
+import { sportSlug } from '../lib/data';
+
+const tiles = [
+  {
+    name: 'Football',
+    image: 'https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=85',
+  },
+  {
+    name: 'Formula 1',
+    image: 'https://images.unsplash.com/photo-1504817343863-5092a923803e?auto=format&fit=crop&w=900&q=85',
+  },
+  {
+    name: 'MotoGP',
+    image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=900&q=85',
+  },
+  {
+    name: 'Tennis',
+    image: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?auto=format&fit=crop&w=900&q=85',
+  },
+  {
+    name: 'Other Events',
+    image: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=900&q=85',
+  },
+];
+
+export default function Home() {
+  return (
+    <>
+      {/* New Grandstand Pass homepage banner */}
+      <section className="relative bg-navy overflow-hidden">
+        <img
+          src="/grandstand-pass-banner.jpg"
+          alt="Grandstand Pass sports tickets featuring Formula 1, football, tennis and MotoGP"
+          className="block w-full h-auto"
+        />
+
+        {/* Invisible clickable area over the banner's Browse Events button */}
+        <Link
+          href="/#events"
+          aria-label="Browse sporting events"
+          className="absolute left-[4%] top-[69%] w-[15%] h-[11%] z-10"
+        />
+      </section>
+
+      {/* Browse by sport */}
+      <section className="container-wide py-14">
+        <div className="eyebrow mb-2">
+          Something for every fan
+        </div>
+
+        <h2 className="section-title mb-7">
+          Browse by sport
+        </h2>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {tiles.map((tile) => (
+            <Link
+              key={tile.name}
+              href={
+                tile.name === 'Football'
+                  ? '/football'
+                  : '/sport/' + sportSlug(tile.name)
+              }
+              className="relative h-44 md:h-52 rounded-xl overflow-hidden group"
+            >
+              <img
+                className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                src={tile.image}
+                alt={tile.name}
+              />
+
+              <div className="absolute inset-0 bg-gradient-to-t from-[#051934e8] via-transparent to-transparent" />
+
+              <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white font-extrabold">
+                <span>{tile.name}</span>
+                <ChevronRight size={18} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* Event listings */}
+      <div className="container-wide">
+        <EventBrowser />
+      </div>
+
+      {/* Bottom promotional section */}
+      <section className="bg-navy text-white">
+        <div className="container-wide py-16 flex flex-col md:flex-row justify-between items-center gap-7">
+          <div>
+            <div className="eyebrow text-blue-300 mb-2">
+              Make it unforgettable
+            </div>
+
+            <h2 className="text-3xl font-black">
+              Every moment starts with a ticket.
+            </h2>
+
+            <p className="text-slate-300 mt-2">
+              Explore events around the globe with Grandstand Pass.
+            </p>
+          </div>
+
+          <Link
+            className="btn-primary shrink-0"
+            href="/#events"
+          >
+            Find an event <ArrowRight size={17} />
+          </Link>
+        </div>
+      </section>
+    </>
+  );
+}
