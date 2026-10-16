@@ -18,9 +18,9 @@ const tiles = [
     image: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=900&q=85',
   },
   {
-    name: 'Tennis',
-    image: 'https://images.unsplash.com/photo-1595435934249-5df7ed86e1c0?auto=format&fit=crop&w=900&q=85',
-  },
+  name: 'Tennis',
+  image: '/tennis-category.png',
+},
   {
     name: 'Other Events',
     image: 'https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=900&q=85',
