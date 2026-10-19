@@ -25,6 +25,29 @@ const sportOptions = [
   ...otherSports,
 ];
 
+const rugbyCompetitions = [
+  {
+    title: 'Nations Championship 2026',
+    matches: (event: (typeof events)[number]) =>
+      event.slug.startsWith('rugby-nations-2026-') ||
+      event.description.includes('Nations Championship 2026'),
+  },
+  {
+    title: 'Six Nations 2027',
+    matches: (event: (typeof events)[number]) =>
+      event.slug.startsWith('rugby-six-nations-2027-') ||
+      event.description.includes('Six Nations 2027'),
+  },
+  {
+    title: 'Rugby World Championship 2027',
+    matches: (event: (typeof events)[number]) =>
+      event.slug.includes('rugby-world') ||
+      /rugby world (cup|championship)/i.test(
+        event.name + ' ' + event.description
+      ),
+  },
+];
+
 export default function EventBrowser({
   initialSport = 'All',
   initialRegion = 'All',
@@ -41,8 +64,10 @@ export default function EventBrowser({
     if (sport === 'All') return true;
 
     if (otherSports.includes(sport)) {
-      return event.sport === 'Other Events' &&
-        event.region === sport;
+      return (
+        event.sport === 'Other Events' &&
+        event.region === sport
+      );
     }
 
     return event.sport === sport;
@@ -59,7 +84,12 @@ export default function EventBrowser({
   const filtered = useMemo(() => {
     return events
       .filter(event => {
-        const sportMatches = matchesSport(event);
+        const sportMatches =
+          sport === 'All' ||
+          (otherSports.includes(sport)
+            ? event.sport === 'Other Events' &&
+              event.region === sport
+            : event.sport === sport);
 
         const regionMatches =
           region === 'All' || event.region === region;
@@ -69,6 +99,7 @@ export default function EventBrowser({
           event.location,
           event.region,
           event.sport,
+          event.description,
         ]
           .join(' ')
           .toLowerCase()
@@ -83,14 +114,35 @@ export default function EventBrowser({
       );
   }, [query, sport, region, sort]);
 
+  const groupedRugbyEvents = rugbyCompetitions.map(
+    competition => ({
+      title: competition.title,
+      items: filtered.filter(competition.matches),
+    })
+  );
+
+  const ungroupedRugbyEvents = filtered.filter(
+    event =>
+      !rugbyCompetitions.some(competition =>
+        competition.matches(event)
+      )
+  );
+
+  const showRugbyGroups = sport === 'Rugby';
+
   return (
     <section id="events" className="py-14">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-7">
         <div>
-          <div className="eyebrow mb-2">Explore the action</div>
-          <h2 className="section-title">Find your next event</h2>
+          <div className="eyebrow mb-2">
+            Explore the action
+          </div>
+          <h2 className="section-title">
+            Find your next event
+          </h2>
           <p className="muted mt-2">
-            Browse event listings while we prepare the live catalogue.
+            Browse event listings while we prepare
+            the live catalogue.
           </p>
         </div>
 
@@ -150,19 +202,76 @@ export default function EventBrowser({
           onChange={e => setSort(e.target.value)}
           aria-label="Sort events"
         >
-          <option value="date">Soonest first</option>
+          <option value="date">
+            Soonest first
+          </option>
           {sport !== 'Formula 1' && (
-            <option value="price">Lowest demo price</option>
+            <option value="price">
+              Lowest demo price
+            </option>
           )}
         </select>
       </div>
 
       {filtered.length ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map(event => (
-            <EventCard key={event.slug} event={event} />
-          ))}
-        </div>
+        showRugbyGroups ? (
+          <div className="space-y-14">
+            {groupedRugbyEvents.map(group =>
+              group.items.length > 0 ? (
+                <div key={group.title}>
+                  <div className="mb-6 border-b border-slate-200 pb-4">
+                    <h2 className="text-2xl md:text-3xl font-black text-navy">
+                      {group.title}
+                    </h2>
+                    <p className="muted mt-2">
+                      {group.items.length}{' '}
+                      {group.items.length === 1
+                        ? 'event'
+                        : 'events'}
+                    </p>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {group.items.map(event => (
+                      <EventCard
+                        key={event.slug}
+                        event={event}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            )}
+
+            {ungroupedRugbyEvents.length > 0 && (
+              <div>
+                <div className="mb-6 border-b border-slate-200 pb-4">
+                  <h2 className="text-2xl md:text-3xl font-black text-navy">
+                    Other Rugby Events
+                  </h2>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {ungroupedRugbyEvents.map(event => (
+                    <EventCard
+                      key={event.slug}
+                      event={event}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filtered.map(event => (
+              <EventCard
+                key={event.slug}
+                event={event}
+              />
+            ))}
+          </div>
+        )
       ) : (
         <div className="text-center py-16 border rounded-xl">
           <SlidersHorizontal className="mx-auto mb-3 text-blue" />
