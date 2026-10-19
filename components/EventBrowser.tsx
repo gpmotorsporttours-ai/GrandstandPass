@@ -65,6 +65,21 @@ const basketballCompetitions = [
   },
 ];
 
+const golfCompetitions = [
+  {
+    title: 'DP World Tour Championship 2026',
+    matches: (event: ListedEvent) =>
+      event.slug.startsWith('dp-world-tour-championship-2026-') ||
+      event.description.includes('DP World Tour Championship 2026'),
+  },
+  {
+    title: 'US Open Golf 2027',
+    matches: (event: ListedEvent) =>
+      event.slug.startsWith('us-open-golf-2027-') ||
+      event.description.includes('US Open Golf 2027'),
+  },
+];
+
 export default function EventBrowser({
   initialSport = 'All',
   initialRegion = 'All',
@@ -122,7 +137,9 @@ export default function EventBrowser({
       ? rugbyCompetitions
       : sport === 'Basketball'
         ? basketballCompetitions
-        : null;
+        : sport === 'Golf'
+          ? golfCompetitions
+          : null;
 
   const groupedEvents = competitions?.map(competition => ({
     title: competition.title,
