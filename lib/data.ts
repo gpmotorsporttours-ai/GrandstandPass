@@ -1,4 +1,4 @@
-
+export const sports = ['Football', 'Formula 1', 'MotoGP', 'Tennis', 'Other Events'] as const;
 export const footballRegions = ['Spain','United Kingdom','Italy','Germany','France','Netherlands','Portugal','Austria','Belgium','Denmark','Scotland','Other Leagues'];
 export type Event = {slug:string;name:string;sport:string;region:string;location:string;date:string;endDate?:string;image:string;description:string;categories:{name:string;description:string;price:number}[]};
 const seats = (base:number)=>[{name:'Standard admission',description:'General ticket category; exact seating not guaranteed.',price:base},{name:'Premium seating',description:'Illustrative premium seating category.',price:Math.round(base*1.7)},{name:'Hospitality',description:'Illustrative hospitality package; inclusions to be confirmed.',price:Math.round(base*3.2)}];
