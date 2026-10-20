@@ -10,6 +10,7 @@ import {
 import { events } from '../../../lib/data';
 import TicketSelector from '../../../components/TicketSelector';
 import Formula1TicketSelector from '../../../components/Formula1TicketSelector';
+import MotoGPTicketSelector from '../../../components/MotoGPTicketSelector';
 
 export default async function EventPage({
   params,
@@ -23,6 +24,7 @@ export default async function EventPage({
   if (!event) notFound();
 
   const isF1 = event.sport === 'Formula 1';
+  const isMotoGP = event.sport === 'MotoGP';
   const isTennis = event.sport === 'Tennis';
 
   const formatDate = (date: string) =>
@@ -69,7 +71,7 @@ export default async function EventPage({
           <div>
             <div className="eyebrow">
               {event.sport} ·{' '}
-              {isF1
+              {isF1 || isMotoGP
                 ? '2027 race calendar'
                 : isTennis
                 ? 'Tournament calendar'
@@ -96,7 +98,7 @@ export default async function EventPage({
                 ? ' – ' + formatDate(event.endDate)
                 : ''}
 
-              {!isF1 && !isTennis
+              {!isF1 && !isMotoGP && !isTennis
                 ? ' (sample date)'
                 : ''}
             </p>
@@ -120,6 +122,8 @@ export default async function EventPage({
 
         {isF1 ? (
           <Formula1TicketSelector />
+        ) : isMotoGP ? (
+          <MotoGPTicketSelector />
         ) : isTennis ? (
           <div className="rounded-2xl border p-8 bg-ice">
             <h2 className="text-2xl font-bold text-navy">
