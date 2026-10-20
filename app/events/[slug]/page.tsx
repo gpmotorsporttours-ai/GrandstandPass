@@ -12,6 +12,7 @@ import TicketSelector from '../../../components/TicketSelector';
 import Formula1TicketSelector from '../../../components/Formula1TicketSelector';
 import MotoGPTicketSelector from '../../../components/MotoGPTicketSelector';
 import TennisTicketSelector from '../../../components/TennisTicketSelector';
+import FootballTicketSelector from '../../../components/FootballTicketSelector';
 
 export default async function EventPage({
   params,
@@ -27,6 +28,7 @@ export default async function EventPage({
   const isF1 = event.sport === 'Formula 1';
   const isMotoGP = event.sport === 'MotoGP';
   const isTennis = event.sport === 'Tennis';
+  const isFootball = event.sport === 'Football';
 
   const formatDate = (date: string) =>
     new Date(date + 'T12:00:00').toLocaleDateString(
@@ -130,6 +132,8 @@ export default async function EventPage({
             startDate={event.date}
             endDate={event.endDate}
           />
+        ) : isFootball ? (
+          <FootballTicketSelector />
         ) : (
           <TicketSelector event={event} />
         )}
