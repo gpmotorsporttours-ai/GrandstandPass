@@ -2,10 +2,19 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import {
+  ShoppingCart,
+  CheckCircle2,
+} from 'lucide-react';
+
+import { useCart } from './CartProvider';
 
 type TennisTicketSelectorProps = {
   startDate: string;
   endDate?: string;
+  eventId?: string;
+  eventName?: string;
 };
 
 type TicketSession = 'day' | 'evening' | 'full-day';
@@ -107,7 +116,11 @@ function getTournamentDates(
 export default function TennisTicketSelector({
   startDate,
   endDate,
+  eventId,
+  eventName,
 }: TennisTicketSelectorProps) {
+  const { addItem } = useCart();
+
   const tournamentDates = getTournamentDates(
     startDate,
     endDate
@@ -124,6 +137,9 @@ export default function TennisTicketSelector({
 
   const [quantity, setQuantity] = useState(2);
 
+  const [addedToCart, setAddedToCart] =
+    useState(false);
+
   const selectedSession = sessions.find(
     (item) => item.id === session
   );
@@ -131,6 +147,44 @@ export default function TennisTicketSelector({
   const selectedCategory = categories.find(
     (item) => item.id === category
   );
+
+  const resetConfirmation = () => {
+    setAddedToCart(false);
+  };
+
+  const canAddToCart = Boolean(
+    eventId && eventName
+  );
+
+  const handleAddToCart = () => {
+    if (
+      !eventId ||
+      !eventName ||
+      !selectedSession ||
+      !selectedCategory
+    ) {
+      return;
+    }
+
+    addItem({
+      id: [
+        'tennis',
+        eventId,
+        selectedDate,
+        session,
+        category,
+      ].join(':'),
+      eventId,
+      eventName,
+      sport: 'Tennis',
+      eventDate: formatDate(selectedDate),
+      session: selectedSession.label,
+      category: selectedCategory.label,
+      quantity,
+    });
+
+    setAddedToCart(true);
+  };
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
@@ -162,7 +216,10 @@ export default function TennisTicketSelector({
             <button
               key={date}
               type="button"
-              onClick={() => setSelectedDate(date)}
+              onClick={() => {
+                setSelectedDate(date);
+                resetConfirmation();
+              }}
               aria-pressed={selectedDate === date}
               className={
                 'rounded-xl border p-4 text-left transition ' +
@@ -195,7 +252,10 @@ export default function TennisTicketSelector({
             <button
               key={item.id}
               type="button"
-              onClick={() => setSession(item.id)}
+              onClick={() => {
+                setSession(item.id);
+                resetConfirmation();
+              }}
               aria-pressed={session === item.id}
               className={
                 'rounded-xl border p-5 text-left transition ' +
@@ -226,7 +286,10 @@ export default function TennisTicketSelector({
             <button
               key={item.id}
               type="button"
-              onClick={() => setCategory(item.id)}
+              onClick={() => {
+                setCategory(item.id);
+                resetConfirmation();
+              }}
               aria-pressed={category === item.id}
               className={
                 'rounded-xl border p-5 text-left transition ' +
@@ -255,11 +318,12 @@ export default function TennisTicketSelector({
         <div className="flex items-center gap-5">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.max(1, current - 1)
-              )
-            }
+              );
+              resetConfirmation();
+            }}
             disabled={quantity <= 1}
             className="h-11 w-11 rounded-xl border border-slate-300 font-bold text-xl disabled:opacity-40"
             aria-label="Remove one ticket"
@@ -273,11 +337,12 @@ export default function TennisTicketSelector({
 
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.min(10, current + 1)
-              )
-            }
+              );
+              resetConfirmation();
+            }}
             disabled={quantity >= 10}
             className="h-11 w-11 rounded-xl border border-slate-300 font-bold text-xl disabled:opacity-40"
             aria-label="Add one ticket"
@@ -298,6 +363,12 @@ export default function TennisTicketSelector({
         </h3>
 
         <div className="mt-4 space-y-2 text-sm">
+          {eventName && (
+            <p>
+              <strong>Event:</strong> {eventName}
+            </p>
+          )}
+
           <p>
             <strong>Date:</strong>{' '}
             {formatDate(selectedDate)}
@@ -338,6 +409,47 @@ export default function TennisTicketSelector({
             conditions will be supplied by XS2Event.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={handleAddToCart}
+          disabled={!canAddToCart}
+          className="mt-6 w-full rounded-xl bg-navy text-white font-bold py-4 flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ShoppingCart size={20} />
+          Add Selection to Cart
+        </button>
+
+        {!canAddToCart && (
+          <p className="muted text-sm mt-3 text-center">
+            Cart integration is being completed.
+            Tournament details will be connected next.
+          </p>
+        )}
+
+        {addedToCart && (
+          <div
+            role="status"
+            className="mt-5 rounded-xl border border-green-200 bg-green-50 p-4"
+          >
+            <div className="flex items-center gap-2 text-green-800 font-bold">
+              <CheckCircle2 size={20} />
+              Selection added to your cart!
+            </div>
+
+            <p className="text-sm text-green-800 mt-2">
+              This is a demonstration selection,
+              not a ticket reservation.
+            </p>
+
+            <Link
+              href="/cart"
+              className="inline-block mt-3 text-sm font-bold text-navy underline"
+            >
+              View Shopping Cart
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );
