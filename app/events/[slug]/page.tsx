@@ -11,6 +11,7 @@ import { events } from '../../../lib/data';
 import TicketSelector from '../../../components/TicketSelector';
 import Formula1TicketSelector from '../../../components/Formula1TicketSelector';
 import MotoGPTicketSelector from '../../../components/MotoGPTicketSelector';
+import TennisTicketSelector from '../../../components/TennisTicketSelector';
 
 export default async function EventPage({
   params,
@@ -125,18 +126,10 @@ export default async function EventPage({
         ) : isMotoGP ? (
           <MotoGPTicketSelector />
         ) : isTennis ? (
-          <div className="rounded-2xl border p-8 bg-ice">
-            <h2 className="text-2xl font-bold text-navy">
-              Tickets coming soon
-            </h2>
-
-            <p className="muted mt-3">
-              Ticket prices and availability through
-              Grandstand Pass are not yet confirmed.
-              Booking will become available when live
-              inventory is connected.
-            </p>
-          </div>
+          <TennisTicketSelector
+            startDate={event.date}
+            endDate={event.endDate}
+          />
         ) : (
           <TicketSelector event={event} />
         )}
