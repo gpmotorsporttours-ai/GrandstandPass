@@ -2,12 +2,22 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import {
   CheckCircle2,
   Minus,
   Plus,
   Ticket,
+  ShoppingCart,
 } from 'lucide-react';
+
+import { useCart } from './CartProvider';
+
+type FootballTicketSelectorProps = {
+  eventId?: string;
+  eventName?: string;
+  eventDate?: string;
+};
 
 const ticketCategories = [
   {
@@ -30,15 +40,50 @@ const ticketCategories = [
   },
 ];
 
-export default function FootballTicketSelector() {
+export default function FootballTicketSelector({
+  eventId,
+  eventName,
+  eventDate,
+}: FootballTicketSelectorProps) {
+  const { addItem } = useCart();
+
   const [selectedCategory, setSelectedCategory] =
     useState('standard');
 
   const [quantity, setQuantity] = useState(1);
 
+  const [addedToCart, setAddedToCart] =
+    useState(false);
+
   const category = ticketCategories.find(
     (item) => item.id === selectedCategory
   );
+
+  const canAddToCart = Boolean(
+    eventId && eventName
+  );
+
+  const handleAddToCart = () => {
+    if (!eventId || !eventName || !category) {
+      return;
+    }
+
+    addItem({
+      id: [
+        'football',
+        eventId,
+        selectedCategory,
+      ].join(':'),
+      eventId,
+      eventName,
+      sport: 'Football',
+      eventDate,
+      category: category.name,
+      quantity,
+    });
+
+    setAddedToCart(true);
+  };
 
   return (
     <section className="rounded-2xl border bg-white p-6 md:p-8">
@@ -71,9 +116,10 @@ export default function FootballTicketSelector() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() =>
-                  setSelectedCategory(item.id)
-                }
+                onClick={() => {
+                  setSelectedCategory(item.id);
+                  setAddedToCart(false);
+                }}
                 aria-pressed={isSelected}
                 className={`rounded-xl border-2 p-5 text-left transition ${
                   isSelected
@@ -111,11 +157,12 @@ export default function FootballTicketSelector() {
         <div className="flex items-center gap-5">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.max(1, current - 1)
-              )
-            }
+              );
+              setAddedToCart(false);
+            }}
             disabled={quantity <= 1}
             aria-label="Remove one ticket"
             className="w-11 h-11 rounded-xl border flex items-center justify-center disabled:opacity-40"
@@ -129,11 +176,12 @@ export default function FootballTicketSelector() {
 
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.min(10, current + 1)
-              )
-            }
+              );
+              setAddedToCart(false);
+            }}
             disabled={quantity >= 10}
             aria-label="Add one ticket"
             className="w-11 h-11 rounded-xl border flex items-center justify-center disabled:opacity-40"
@@ -153,6 +201,18 @@ export default function FootballTicketSelector() {
         </h3>
 
         <div className="space-y-3 text-sm">
+          {eventName && (
+            <div className="flex justify-between gap-4">
+              <span className="muted">
+                Match
+              </span>
+
+              <span className="font-bold text-navy text-right">
+                {eventName}
+              </span>
+            </div>
+          )}
+
           <div className="flex justify-between gap-4">
             <span className="muted">
               Ticket category
@@ -187,11 +247,44 @@ export default function FootballTicketSelector() {
         <div className="border-t mt-5 pt-5">
           <button
             type="button"
-            disabled
-            className="w-full rounded-xl bg-navy text-white font-bold py-4 opacity-60 cursor-not-allowed"
+            onClick={handleAddToCart}
+            disabled={!canAddToCart}
+            className="w-full rounded-xl bg-navy text-white font-bold py-4 flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Booking Available Soon
+            <ShoppingCart size={20} />
+            Add Selection to Cart
           </button>
+
+          {!canAddToCart && (
+            <p className="muted text-sm mt-3 text-center">
+              Cart integration is being completed.
+              Match details will be connected next.
+            </p>
+          )}
+
+          {addedToCart && (
+            <div
+              role="status"
+              className="mt-5 rounded-xl border border-green-200 bg-green-50 p-4"
+            >
+              <div className="flex items-center gap-2 text-green-800 font-bold">
+                <CheckCircle2 size={20} />
+                Selection added to your cart!
+              </div>
+
+              <p className="text-sm text-green-800 mt-2">
+                This is a demonstration selection,
+                not a confirmed ticket reservation.
+              </p>
+
+              <Link
+                href="/cart"
+                className="inline-block mt-3 text-sm font-bold text-navy underline"
+              >
+                View Shopping Cart
+              </Link>
+            </div>
+          )}
 
           <p className="muted text-xs mt-4 text-center">
             Ticket categories shown are for demonstration
