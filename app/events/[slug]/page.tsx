@@ -139,6 +139,8 @@ export default async function EventPage({
           <TennisTicketSelector
             startDate={event.date}
             endDate={event.endDate}
+            eventId={event.slug}
+            eventName={event.name}
           />
         ) : isFootball ? (
           <FootballTicketSelector />
@@ -149,3 +151,4 @@ export default async function EventPage({
     </>
   );
 }
+
