@@ -53,6 +53,36 @@ const countryCodes: Record<string, string> = {
   'United Arab Emirates': 'ae',
 };
 
+function WorldMapBackground() {
+  return (
+    <div
+      aria-hidden="true"
+      className="absolute inset-0 overflow-hidden bg-[#102846]"
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            'url("https://upload.wikimedia.org/wikipedia/commons/8/80/World_map_-_low_resolution.svg")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          opacity: 0.32,
+          filter: 'sepia(1) saturate(1.4) brightness(1.3)',
+        }}
+      />
+
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(10,31,57,0.25), rgba(6,19,39,0.65))',
+        }}
+      />
+    </div>
+  );
+}
+
 export default function Football() {
   const [region, setRegion] = useState('All');
 
@@ -95,6 +125,8 @@ export default function Football() {
           {footballRegions.map((r) => {
             const countryCode = countryCodes[r];
             const hasFlag = Boolean(countryCode);
+            const isOtherLeagues = r === 'Other Leagues';
+            const hasBackground = hasFlag || isOtherLeagues;
 
             return (
               <button
@@ -136,13 +168,15 @@ export default function Football() {
                       }}
                     />
                   </>
+                ) : isOtherLeagues ? (
+                  <WorldMapBackground />
                 ) : (
                   <div className="absolute inset-0 bg-slate-100" />
                 )}
 
                 <div className="relative z-10 flex h-full min-h-[128px] flex-col justify-between">
                   <div>
-                    {!hasFlag &&
+                    {!hasBackground &&
                       (r === 'All' ? (
                         <Globe2
                           size={28}
@@ -160,7 +194,7 @@ export default function Football() {
                     <div
                       className={
                         'text-lg font-extrabold ' +
-                        (hasFlag
+                        (hasBackground
                           ? 'text-white'
                           : 'text-navy')
                       }
@@ -171,7 +205,7 @@ export default function Football() {
                     <div
                       className={
                         'text-xs mt-2 ' +
-                        (hasFlag
+                        (hasBackground
                           ? 'text-white/90'
                           : 'muted')
                       }
