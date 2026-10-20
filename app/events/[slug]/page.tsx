@@ -130,7 +130,11 @@ export default async function EventPage({
             eventDate={event.date}
           />
         ) : isMotoGP ? (
-          <MotoGPTicketSelector />
+          <MotoGPTicketSelector
+            eventId={event.slug}
+            eventName={event.name}
+            eventDate={event.date}
+          />
         ) : isTennis ? (
           <TennisTicketSelector
             startDate={event.date}
