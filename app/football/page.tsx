@@ -6,78 +6,52 @@ import { Globe2, MapPin } from 'lucide-react';
 import { footballRegions, events } from '../../lib/data';
 import EventBrowser from '../../components/EventBrowser';
 
-const countryFlags: Record<string, string> = {
-  England: '🏴',
-  Scotland: '🏴',
-  Wales: '🏴',
-  Ireland: '🇮🇪',
-  'Northern Ireland': '🇬🇧',
-  Spain: '🇪🇸',
-  Italy: '🇮🇹',
-  Germany: '🇩🇪',
-  France: '🇫🇷',
-  Portugal: '🇵🇹',
-  Netherlands: '🇳🇱',
-  Belgium: '🇧🇪',
-  Switzerland: '🇨🇭',
-  Austria: '🇦🇹',
-  Turkey: '🇹🇷',
-  Türkiye: '🇹🇷',
-  Greece: '🇬🇷',
-  Denmark: '🇩🇰',
-  Sweden: '🇸🇪',
-  Norway: '🇳🇴',
-  Finland: '🇫🇮',
-  Poland: '🇵🇱',
-  Croatia: '🇭🇷',
-  Serbia: '🇷🇸',
-  Czechia: '🇨🇿',
-  'Czech Republic': '🇨🇿',
-  Hungary: '🇭🇺',
-  Romania: '🇷🇴',
-  Ukraine: '🇺🇦',
-  Brazil: '🇧🇷',
-  Argentina: '🇦🇷',
-  Uruguay: '🇺🇾',
-  Mexico: '🇲🇽',
-  USA: '🇺🇸',
-  'United States': '🇺🇸',
-  Canada: '🇨🇦',
-  Japan: '🇯🇵',
-  China: '🇨🇳',
-  'South Korea': '🇰🇷',
-  Australia: '🇦🇺',
-  'South Africa': '🇿🇦',
-  Morocco: '🇲🇦',
-  Egypt: '🇪🇬',
-  Nigeria: '🇳🇬',
-  'Saudi Arabia': '🇸🇦',
-  Qatar: '🇶🇦',
-  UAE: '🇦🇪',
-  'United Arab Emirates': '🇦🇪',
+const countryCodes: Record<string, string> = {
+  Spain: 'es',
+  'United Kingdom': 'gb',
+  England: 'gb-eng',
+  Scotland: 'gb-sct',
+  Wales: 'gb-wls',
+  Italy: 'it',
+  Germany: 'de',
+  France: 'fr',
+  Netherlands: 'nl',
+  Portugal: 'pt',
+  Austria: 'at',
+  Belgium: 'be',
+  Denmark: 'dk',
+  Ireland: 'ie',
+  'Northern Ireland': 'gb-nir',
+  Switzerland: 'ch',
+  Sweden: 'se',
+  Norway: 'no',
+  Finland: 'fi',
+  Poland: 'pl',
+  Turkey: 'tr',
+  Türkiye: 'tr',
+  Greece: 'gr',
+  Croatia: 'hr',
+  Serbia: 'rs',
+  Hungary: 'hu',
+  Romania: 'ro',
+  Ukraine: 'ua',
+  Brazil: 'br',
+  Argentina: 'ar',
+  Mexico: 'mx',
+  USA: 'us',
+  'United States': 'us',
+  Canada: 'ca',
+  Japan: 'jp',
+  Australia: 'au',
+  'South Africa': 'za',
+  Morocco: 'ma',
+  Egypt: 'eg',
+  Nigeria: 'ng',
+  'Saudi Arabia': 'sa',
+  Qatar: 'qa',
+  UAE: 'ae',
+  'United Arab Emirates': 'ae',
 };
-
-function CountryFlag({ country }: { country: string }) {
-  if (country === 'All') {
-    return <Globe2 size={30} className="text-blue" />;
-  }
-
-  const flag = countryFlags[country];
-
-  if (!flag) {
-    return <MapPin size={30} className="text-blue" />;
-  }
-
-  return (
-    <span
-      role="img"
-      aria-label={`${country} flag`}
-      className="text-3xl leading-none"
-    >
-      {flag}
-    </span>
-  );
-}
 
 export default function Football() {
   const [region, setRegion] = useState('All');
@@ -118,37 +92,101 @@ export default function Football() {
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {footballRegions.map((r) => (
-            <button
-              key={r}
-              onClick={() => {
-                setRegion(r);
-                document
-                  .getElementById('country-events')
-                  ?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className={
-                'text-left rounded-xl border p-5 hover:border-blue hover:shadow-md ' +
-                (region === r
-                  ? 'border-blue bg-blue/5'
-                  : 'border-slate-200 bg-white')
-              }
-            >
-              <div className="mb-3 h-9 flex items-center">
-                <CountryFlag country={r} />
-              </div>
+          {footballRegions.map((r) => {
+            const countryCode = countryCodes[r];
+            const hasFlag = Boolean(countryCode);
 
-              <div className="font-extrabold">{r}</div>
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => {
+                  setRegion(r);
+                  document
+                    .getElementById('country-events')
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                    });
+                }}
+                className={
+                  'relative isolate overflow-hidden rounded-xl border ' +
+                  'min-h-[170px] p-5 text-left transition-all ' +
+                  'hover:shadow-lg hover:-translate-y-0.5 ' +
+                  (region === r
+                    ? 'border-blue ring-2 ring-blue'
+                    : 'border-slate-200')
+                }
+              >
+                {hasFlag ? (
+                  <>
+                    <div
+                      className="absolute inset-0 bg-cover bg-center"
+                      style={{
+                        backgroundImage:
+                          `url("https://flagcdn.com/w640/${countryCode}.png")`,
+                        filter: 'saturate(0.72) brightness(0.85)',
+                      }}
+                    />
 
-              <div className="text-xs muted mt-2">
-                {count(r)
-                  ? `${count(r)} sample event${
-                      count(r) > 1 ? 's' : ''
-                    }`
-                  : 'Listings coming with API'}
-              </div>
-            </button>
-          ))}
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        background:
+                          'linear-gradient(to top, rgba(5,18,43,0.88) 0%, rgba(5,18,43,0.35) 55%, rgba(5,18,43,0.12) 100%)',
+                      }}
+                    />
+                  </>
+                ) : (
+                  <div className="absolute inset-0 bg-slate-100" />
+                )}
+
+                <div className="relative z-10 flex h-full min-h-[128px] flex-col justify-between">
+                  <div>
+                    {!hasFlag &&
+                      (r === 'All' ? (
+                        <Globe2
+                          size={28}
+                          className="text-blue"
+                        />
+                      ) : (
+                        <MapPin
+                          size={28}
+                          className="text-blue"
+                        />
+                      ))}
+                  </div>
+
+                  <div>
+                    <div
+                      className={
+                        'text-lg font-extrabold ' +
+                        (hasFlag
+                          ? 'text-white'
+                          : 'text-navy')
+                      }
+                    >
+                      {r}
+                    </div>
+
+                    <div
+                      className={
+                        'text-xs mt-2 ' +
+                        (hasFlag
+                          ? 'text-white/90'
+                          : 'muted')
+                      }
+                    >
+                      {count(r)
+                        ? `${count(r)} sample event${
+                            count(r) > 1 ? 's' : ''
+                          }`
+                        : 'Listings coming with API'}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         <div id="country-events" className="pt-6">
