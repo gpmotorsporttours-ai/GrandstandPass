@@ -143,7 +143,11 @@ export default async function EventPage({
             eventName={event.name}
           />
         ) : isFootball ? (
-          <FootballTicketSelector />
+          <FootballTicketSelector
+            eventId={event.slug}
+            eventName={event.name}
+            eventDate={event.date}
+          />
         ) : (
           <TicketSelector event={event} />
         )}
@@ -151,4 +155,3 @@ export default async function EventPage({
     </>
   );
 }
-
