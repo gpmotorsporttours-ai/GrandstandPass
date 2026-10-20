@@ -2,6 +2,9 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { ShoppingCart, CheckCircle2 } from 'lucide-react';
+import { useCart } from './CartProvider';
 
 type TicketDuration =
   | 'friday'
@@ -14,11 +17,33 @@ type TicketCategory =
   | 'grandstand'
   | 'hospitality';
 
+type Formula1TicketSelectorProps = {
+  eventId?: string;
+  eventName?: string;
+  eventDate?: string;
+};
+
 const durations = [
-  { id: 'friday', label: 'Friday', detail: 'Practice sessions' },
-  { id: 'saturday', label: 'Saturday', detail: 'Qualifying day' },
-  { id: 'sunday', label: 'Sunday', detail: 'Race day' },
-  { id: 'weekend', label: 'Full Weekend', detail: 'Multi-day access' },
+  {
+    id: 'friday',
+    label: 'Friday',
+    detail: 'Practice sessions',
+  },
+  {
+    id: 'saturday',
+    label: 'Saturday',
+    detail: 'Qualifying day',
+  },
+  {
+    id: 'sunday',
+    label: 'Sunday',
+    detail: 'Race day',
+  },
+  {
+    id: 'weekend',
+    label: 'Full Weekend',
+    detail: 'Multi-day access',
+  },
 ] as const;
 
 const categories = [
@@ -39,7 +64,13 @@ const categories = [
   },
 ] as const;
 
-export default function Formula1TicketSelector() {
+export default function Formula1TicketSelector({
+  eventId,
+  eventName,
+  eventDate,
+}: Formula1TicketSelectorProps) {
+  const { addItem } = useCart();
+
   const [duration, setDuration] =
     useState<TicketDuration>('weekend');
 
@@ -48,12 +79,52 @@ export default function Formula1TicketSelector() {
 
   const [quantity, setQuantity] = useState(2);
 
+  const [addedToCart, setAddedToCart] =
+    useState(false);
+
   const selectedDuration = durations.find(
     (item) => item.id === duration
   );
 
   const selectedCategory = categories.find(
     (item) => item.id === category
+  );
+
+  const resetConfirmation = () => {
+    setAddedToCart(false);
+  };
+
+  const handleAddToCart = () => {
+    if (
+      !eventId ||
+      !eventName ||
+      !selectedDuration ||
+      !selectedCategory
+    ) {
+      return;
+    }
+
+    addItem({
+      id: [
+        'formula-1',
+        eventId,
+        duration,
+        category,
+      ].join(':'),
+      eventId,
+      eventName,
+      sport: 'Formula 1',
+      eventDate,
+      session: selectedDuration.label,
+      category: selectedCategory.label,
+      quantity,
+    });
+
+    setAddedToCart(true);
+  };
+
+  const canAddToCart = Boolean(
+    eventId && eventName
   );
 
   return (
@@ -85,7 +156,10 @@ export default function Formula1TicketSelector() {
             <button
               key={item.id}
               type="button"
-              onClick={() => setDuration(item.id)}
+              onClick={() => {
+                setDuration(item.id);
+                resetConfirmation();
+              }}
               aria-pressed={duration === item.id}
               className={
                 'rounded-xl border p-4 text-left transition ' +
@@ -116,7 +190,10 @@ export default function Formula1TicketSelector() {
             <button
               key={item.id}
               type="button"
-              onClick={() => setCategory(item.id)}
+              onClick={() => {
+                setCategory(item.id);
+                resetConfirmation();
+              }}
               aria-pressed={category === item.id}
               className={
                 'rounded-xl border p-5 text-left transition ' +
@@ -145,11 +222,12 @@ export default function Formula1TicketSelector() {
         <div className="flex items-center gap-5">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.max(1, current - 1)
-              )
-            }
+              );
+              resetConfirmation();
+            }}
             disabled={quantity <= 1}
             className="h-11 w-11 rounded-xl border border-slate-300 font-bold text-xl disabled:opacity-40"
             aria-label="Remove one ticket"
@@ -163,11 +241,12 @@ export default function Formula1TicketSelector() {
 
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
               setQuantity((current) =>
                 Math.min(10, current + 1)
-              )
-            }
+              );
+              resetConfirmation();
+            }}
             disabled={quantity >= 10}
             className="h-11 w-11 rounded-xl border border-slate-300 font-bold text-xl disabled:opacity-40"
             aria-label="Add one ticket"
@@ -189,6 +268,12 @@ export default function Formula1TicketSelector() {
         </h3>
 
         <div className="mt-4 space-y-2 text-sm">
+          {eventName && (
+            <p>
+              <strong>Event:</strong> {eventName}
+            </p>
+          )}
+
           <p>
             <strong>Duration:</strong>{' '}
             {selectedDuration?.label}
@@ -223,8 +308,48 @@ export default function Formula1TicketSelector() {
             will be supplied by XS2Event.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={handleAddToCart}
+          disabled={!canAddToCart}
+          className="mt-6 w-full rounded-xl bg-navy text-white font-bold py-4 flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ShoppingCart size={20} />
+          Add Selection to Cart
+        </button>
+
+        {!canAddToCart && (
+          <p className="muted text-sm mt-3 text-center">
+            Cart integration is being completed.
+            Event details will be connected next.
+          </p>
+        )}
+
+        {addedToCart && (
+          <div
+            role="status"
+            className="mt-5 rounded-xl border border-green-200 bg-green-50 p-4"
+          >
+            <div className="flex items-center gap-2 text-green-800 font-bold">
+              <CheckCircle2 size={20} />
+              Selection added to your cart!
+            </div>
+
+            <p className="text-sm text-green-800 mt-2">
+              This is a demonstration selection,
+              not a ticket reservation.
+            </p>
+
+            <Link
+              href="/cart"
+              className="inline-block mt-3 text-sm font-bold text-navy underline"
+            >
+              View Shopping Cart
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );
 }
-
