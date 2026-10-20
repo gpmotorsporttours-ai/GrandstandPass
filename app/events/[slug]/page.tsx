@@ -124,7 +124,11 @@ export default async function EventPage({
         </div>
 
         {isF1 ? (
-          <Formula1TicketSelector />
+          <Formula1TicketSelector
+            eventId={event.slug}
+            eventName={event.name}
+            eventDate={event.date}
+          />
         ) : isMotoGP ? (
           <MotoGPTicketSelector />
         ) : isTennis ? (
