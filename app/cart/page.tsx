@@ -12,6 +12,37 @@ import {
 } from 'lucide-react';
 
 import { useCart } from '../../components/CartProvider';
+import {
+  formatCurrency,
+  isSupportedCurrency,
+} from '../../lib/currency';
+
+function formatOriginalPrice(
+  amount: number,
+  currency: string
+): string {
+  if (
+    !Number.isFinite(amount) ||
+    amount < 0
+  ) {
+    return 'Price unavailable';
+  }
+
+  if (isSupportedCurrency(currency)) {
+    return formatCurrency(amount, currency);
+  }
+
+  try {
+    return new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return 'Price unavailable';
+  }
+}
 
 export default function CartPage() {
   const {
@@ -22,22 +53,26 @@ export default function CartPage() {
     itemCount,
     total,
     currency,
+    displayCurrency,
   } = useCart();
 
-  const formatPrice = (amount: number) => {
-    if (!currency) {
-      return 'Price unavailable';
-    }
+  const hasPricedItems = items.some(
+    (item) =>
+      typeof item.price === 'number' &&
+      Number.isFinite(item.price) &&
+      item.price >= 0 &&
+      typeof item.currency === 'string' &&
+      item.currency.length > 0
+  );
 
-    try {
-      return new Intl.NumberFormat('en-GB', {
-        style: 'currency',
-        currency,
-      }).format(amount);
-    } catch {
-      return 'Price unavailable';
-    }
-  };
+  const hasDifferentCurrency = items.some(
+    (item) =>
+      typeof item.price === 'number' &&
+      Number.isFinite(item.price) &&
+      item.price >= 0 &&
+      item.currency &&
+      item.currency !== displayCurrency
+  );
 
   return (
     <>
@@ -98,113 +133,133 @@ export default function CartPage() {
         ) : (
           <div className="grid lg:grid-cols-3 gap-8 items-start">
             <div className="lg:col-span-2 space-y-5">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-2xl border bg-white p-6"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="rounded-xl bg-ice p-3">
-                      <Ticket
-                        size={24}
-                        className="text-blue"
-                      />
-                    </div>
+              {items.map((item) => {
+                const hasPrice =
+                  typeof item.price === 'number' &&
+                  Number.isFinite(item.price) &&
+                  item.price >= 0 &&
+                  typeof item.currency === 'string' &&
+                  item.currency.length > 0;
 
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold uppercase tracking-wide text-blue">
-                        {item.sport}
-                      </p>
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border bg-white p-6"
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className="rounded-xl bg-ice p-3">
+                        <Ticket
+                          size={24}
+                          className="text-blue"
+                        />
+                      </div>
 
-                      <h2 className="text-xl font-black text-navy mt-1">
-                        {item.eventName}
-                      </h2>
-
-                      {item.eventDate && (
-                        <p className="muted text-sm mt-2">
-                          Date: {item.eventDate}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold uppercase tracking-wide text-blue">
+                          {item.sport}
                         </p>
-                      )}
 
-                      {item.session && (
-                        <p className="muted text-sm mt-2">
-                          Session: {item.session}
+                        <h2 className="text-xl font-black text-navy mt-1">
+                          {item.eventName}
+                        </h2>
+
+                        {item.eventDate && (
+                          <p className="muted text-sm mt-2">
+                            Date: {item.eventDate}
+                          </p>
+                        )}
+
+                        {item.session && (
+                          <p className="muted text-sm mt-2">
+                            Session: {item.session}
+                          </p>
+                        )}
+
+                        <p className="text-sm mt-2">
+                          <span className="muted">
+                            Category:
+                          </span>{' '}
+                          <span className="font-semibold text-navy">
+                            {item.category}
+                          </span>
                         </p>
-                      )}
-
-                      <p className="text-sm mt-2">
-                        <span className="muted">
-                          Category:
-                        </span>{' '}
-                        <span className="font-semibold text-navy">
-                          {item.category}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="border-t mt-5 pt-5 flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateQuantity(
-                            item.id,
-                            item.quantity - 1
-                          )
-                        }
-                        aria-label={`Decrease quantity for ${item.eventName}`}
-                        className="w-10 h-10 rounded-lg border flex items-center justify-center"
-                      >
-                        <Minus size={17} />
-                      </button>
-
-                      <span className="font-black text-navy min-w-6 text-center">
-                        {item.quantity}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateQuantity(
-                            item.id,
-                            item.quantity + 1
-                          )
-                        }
-                        disabled={item.quantity >= 10}
-                        aria-label={`Increase quantity for ${item.eventName}`}
-                        className="w-10 h-10 rounded-lg border flex items-center justify-center disabled:opacity-40"
-                      >
-                        <Plus size={17} />
-                      </button>
+                      </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        removeItem(item.id)
-                      }
-                      className="inline-flex items-center gap-2 text-sm font-semibold text-red-600 hover:underline"
-                    >
-                      <Trash2 size={17} />
-                      Remove
-                    </button>
-                  </div>
-
-                  <div className="mt-4 text-sm font-semibold text-navy">
-                    {typeof item.price === 'number' &&
-                    item.currency
-                      ? `Unit price: ${new Intl.NumberFormat(
-                          'en-GB',
-                          {
-                            style: 'currency',
-                            currency: item.currency,
+                    <div className="border-t mt-5 pt-5 flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateQuantity(
+                              item.id,
+                              item.quantity - 1
+                            )
                           }
-                        ).format(item.price)}`
-                      : 'Price: Awaiting live supplier pricing'}
+                          aria-label={`Decrease quantity for ${item.eventName}`}
+                          className="w-10 h-10 rounded-lg border flex items-center justify-center"
+                        >
+                          <Minus size={17} />
+                        </button>
+
+                        <span className="font-black text-navy min-w-6 text-center">
+                          {item.quantity}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateQuantity(
+                              item.id,
+                              item.quantity + 1
+                            )
+                          }
+                          disabled={item.quantity >= 10}
+                          aria-label={`Increase quantity for ${item.eventName}`}
+                          className="w-10 h-10 rounded-lg border flex items-center justify-center disabled:opacity-40"
+                        >
+                          <Plus size={17} />
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          removeItem(item.id)
+                        }
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-red-600 hover:underline"
+                      >
+                        <Trash2 size={17} />
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="mt-4 text-sm font-semibold text-navy">
+                      {hasPrice && item.currency ? (
+                        <>
+                          Unit price:{' '}
+                          {formatOriginalPrice(
+                            item.price!,
+                            item.currency
+                          )}
+
+                          {item.currency !==
+                            displayCurrency && (
+                            <p className="muted text-xs font-normal mt-2">
+                              Original ticket currency:{' '}
+                              {item.currency}. Conversion
+                              to {displayCurrency} is not
+                              available yet.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        'Price: Awaiting live supplier pricing'
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               <button
                 type="button"
@@ -234,16 +289,40 @@ export default function CartPage() {
 
                 <div className="flex justify-between gap-4">
                   <span className="muted">
+                    Preferred display currency
+                  </span>
+
+                  <span className="font-bold text-navy">
+                    {displayCurrency}
+                  </span>
+                </div>
+
+                <div className="flex justify-between gap-4">
+                  <span className="muted">
                     Total price
                   </span>
 
                   <span className="font-bold text-navy text-right">
-                    {total !== null
-                      ? formatPrice(total)
+                    {total !== null && currency
+                      ? formatOriginalPrice(
+                          total,
+                          currency
+                        )
                       : 'Awaiting live pricing'}
                   </span>
                 </div>
               </div>
+
+              {hasPricedItems &&
+                hasDifferentCurrency && (
+                  <p className="text-xs muted mt-4">
+                    Prices are currently displayed in
+                    their original ticket currencies.
+                    Conversion to {displayCurrency} will
+                    become available when verified
+                    exchange rates are connected.
+                  </p>
+                )}
 
               <button
                 type="button"
