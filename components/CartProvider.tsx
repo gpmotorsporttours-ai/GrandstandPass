@@ -9,12 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 
-export type DisplayCurrency =
-  | 'ZAR'
-  | 'EUR'
-  | 'USD'
-  | 'GBP'
-  | 'AED';
+import {
+  DEFAULT_DISPLAY_CURRENCY,
+  SUPPORTED_CURRENCIES,
+  isSupportedCurrency,
+  type SupportedCurrency,
+} from '../lib/currency';
+
+export type DisplayCurrency = SupportedCurrency;
 
 export type CartItem = {
   id: string;
@@ -42,35 +44,19 @@ type CartContextType = {
   setDisplayCurrency: (currency: DisplayCurrency) => void;
 };
 
-const CartContext = createContext<CartContextType | undefined>(
-  undefined
-);
+const CartContext =
+  createContext<CartContextType | undefined>(
+    undefined
+  );
 
-const CART_STORAGE_KEY = 'grandstand-pass-cart';
+const CART_STORAGE_KEY =
+  'grandstand-pass-cart';
 
 const CURRENCY_STORAGE_KEY =
   'grandstand-pass-display-currency';
 
-const DEFAULT_CURRENCY: DisplayCurrency = 'EUR';
-
-export const DISPLAY_CURRENCIES: DisplayCurrency[] = [
-  'ZAR',
-  'EUR',
-  'USD',
-  'GBP',
-  'AED',
-];
-
-function isDisplayCurrency(
-  value: unknown
-): value is DisplayCurrency {
-  return (
-    typeof value === 'string' &&
-    DISPLAY_CURRENCIES.some(
-      (currency) => currency === value
-    )
-  );
-}
+export const DISPLAY_CURRENCIES:
+  DisplayCurrency[] = [...SUPPORTED_CURRENCIES];
 
 function isCartItem(value: unknown): value is CartItem {
   if (
@@ -84,6 +70,7 @@ function isCartItem(value: unknown): value is CartItem {
 
   return (
     typeof item.id === 'string' &&
+    item.id.length > 0 &&
     typeof item.eventId === 'string' &&
     typeof item.eventName === 'string' &&
     typeof item.sport === 'string' &&
@@ -92,12 +79,29 @@ function isCartItem(value: unknown): value is CartItem {
     Number.isInteger(item.quantity) &&
     item.quantity >= 1 &&
     item.quantity <= 10 &&
-    (item.price === undefined ||
-      (typeof item.price === 'number' &&
+    (
+      item.price === undefined ||
+      (
+        typeof item.price === 'number' &&
         Number.isFinite(item.price) &&
-        item.price >= 0)) &&
-    (item.currency === undefined ||
-      typeof item.currency === 'string')
+        item.price >= 0
+      )
+    ) &&
+    (
+      item.currency === undefined ||
+      typeof item.currency === 'string'
+    )
+  );
+}
+
+function hasValidPricing(
+  item: CartItem
+): boolean {
+  return (
+    typeof item.price === 'number' &&
+    Number.isFinite(item.price) &&
+    item.price > 0 &&
+    isSupportedCurrency(item.currency)
   );
 }
 
@@ -106,23 +110,34 @@ export function CartProvider({
 }: {
   children: ReactNode;
 }) {
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [items, setItems] =
+    useState<CartItem[]>([]);
 
-  const [displayCurrency, setDisplayCurrencyState] =
-    useState<DisplayCurrency>(DEFAULT_CURRENCY);
+  const [isLoaded, setIsLoaded] =
+    useState(false);
+
+  const [
+    displayCurrency,
+    setDisplayCurrencyState,
+  ] = useState<DisplayCurrency>(
+    DEFAULT_DISPLAY_CURRENCY
+  );
 
   useEffect(() => {
     try {
-      const savedCart = localStorage.getItem(
-        CART_STORAGE_KEY
-      );
+      const savedCart =
+        localStorage.getItem(
+          CART_STORAGE_KEY
+        );
 
       if (savedCart) {
-        const parsed: unknown = JSON.parse(savedCart);
+        const parsed: unknown =
+          JSON.parse(savedCart);
 
         if (Array.isArray(parsed)) {
-          setItems(parsed.filter(isCartItem));
+          setItems(
+            parsed.filter(isCartItem)
+          );
         }
       }
     } catch (error) {
@@ -133,12 +148,19 @@ export function CartProvider({
     }
 
     try {
-      const savedCurrency = localStorage.getItem(
-        CURRENCY_STORAGE_KEY
-      );
+      const savedCurrency =
+        localStorage.getItem(
+          CURRENCY_STORAGE_KEY
+        );
 
-      if (isDisplayCurrency(savedCurrency)) {
-        setDisplayCurrencyState(savedCurrency);
+      if (
+        isSupportedCurrency(
+          savedCurrency
+        )
+      ) {
+        setDisplayCurrencyState(
+          savedCurrency
+        );
       }
     } catch (error) {
       console.error(
@@ -184,49 +206,78 @@ export function CartProvider({
         error
       );
     }
-  }, [displayCurrency, isLoaded]);
+  }, [
+    displayCurrency,
+    isLoaded,
+  ]);
 
   const setDisplayCurrency = (
     nextCurrency: DisplayCurrency
   ) => {
-    if (!isDisplayCurrency(nextCurrency)) {
+    if (
+      !isSupportedCurrency(
+        nextCurrency
+      )
+    ) {
       return;
     }
 
-    setDisplayCurrencyState(nextCurrency);
+    setDisplayCurrencyState(
+      nextCurrency
+    );
   };
 
-  const addItem = (newItem: CartItem) => {
-    if (!isCartItem(newItem)) {
+  const addItem = (
+    newItem: CartItem
+  ) => {
+    if (
+      !isCartItem(newItem)
+    ) {
       return;
     }
 
-    setItems((currentItems) => {
-      const existingItem = currentItems.find(
-        (item) => item.id === newItem.id
-      );
+    setItems(
+      (currentItems) => {
+        const existingItem =
+          currentItems.find(
+            (item) =>
+              item.id === newItem.id
+          );
 
-      if (existingItem) {
-        return currentItems.map((item) =>
-          item.id === newItem.id
-            ? {
-                ...item,
-                quantity: Math.min(
-                  10,
-                  item.quantity + newItem.quantity
-                ),
-              }
-            : item
-        );
+        if (existingItem) {
+          return currentItems.map(
+            (item) =>
+              item.id === newItem.id
+                ? {
+                    ...item,
+                    quantity:
+                      Math.min(
+                        10,
+                        item.quantity +
+                          newItem.quantity
+                      ),
+                  }
+                : item
+          );
+        }
+
+        return [
+          ...currentItems,
+          newItem,
+        ];
       }
-
-      return [...currentItems, newItem];
-    });
+    );
   };
 
-  const removeItem = (id: string) => {
-    setItems((currentItems) =>
-      currentItems.filter((item) => item.id !== id)
+  const removeItem = (
+    id: string
+  ) => {
+    setItems(
+      (currentItems) =>
+        currentItems.filter(
+          (item) =>
+            item.id !== id
+        )
     );
   };
 
@@ -234,24 +285,36 @@ export function CartProvider({
     id: string,
     quantity: number
   ) => {
-    if (!Number.isInteger(quantity)) {
+    if (
+      !Number.isInteger(
+        quantity
+      )
+    ) {
       return;
     }
 
-    if (quantity <= 0) {
+    if (
+      quantity <= 0
+    ) {
       removeItem(id);
       return;
     }
 
-    setItems((currentItems) =>
-      currentItems.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              quantity: Math.min(10, quantity),
-            }
-          : item
-      )
+    setItems(
+      (currentItems) =>
+        currentItems.map(
+          (item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  quantity:
+                    Math.min(
+                      10,
+                      quantity
+                    ),
+                }
+              : item
+        )
     );
   };
 
@@ -259,41 +322,49 @@ export function CartProvider({
     setItems([]);
   };
 
-  const itemCount = items.reduce(
-    (count, item) => count + item.quantity,
-    0
-  );
-
-  const currencies = [
-    ...new Set(
-      items
-        .map((item) => item.currency)
-        .filter(Boolean)
-    ),
-  ];
-
-  const currency =
-    currencies.length === 1
-      ? currencies[0] ?? null
-      : null;
+  const itemCount =
+    items.reduce(
+      (count, item) =>
+        count +
+        item.quantity,
+      0
+    );
 
   const hasCompletePricing =
     items.length > 0 &&
     items.every(
-      (item) =>
-        typeof item.price === 'number' &&
-        typeof item.currency === 'string' &&
-        item.currency.length > 0
-    ) &&
-    currency !== null;
+      hasValidPricing
+    );
 
-  const total = hasCompletePricing
-    ? items.reduce(
-        (sum, item) =>
-          sum + (item.price ?? 0) * item.quantity,
-        0
-      )
-    : null;
+  const originalCurrencies =
+    hasCompletePricing
+      ? [
+          ...new Set(
+            items.map(
+              (item) =>
+                item.currency
+            )
+          ),
+        ]
+      : [];
+
+  const currency =
+    originalCurrencies.length === 1
+      ? originalCurrencies[0] ??
+        null
+      : null;
+
+  const total =
+    hasCompletePricing &&
+    currency !== null
+      ? items.reduce(
+          (sum, item) =>
+            sum +
+            (item.price ?? 0) *
+              item.quantity,
+          0
+        )
+      : null;
 
   return (
     <CartContext.Provider
@@ -316,7 +387,10 @@ export function CartProvider({
 }
 
 export function useCart() {
-  const context = useContext(CartContext);
+  const context =
+    useContext(
+      CartContext
+    );
 
   if (!context) {
     throw new Error(
