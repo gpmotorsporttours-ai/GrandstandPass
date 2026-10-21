@@ -1,6 +1,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getXS2EventSports } from '../../../lib/xs2event';
+import {
+  getXS2EventSports,
+  XS2EventAPIError,
+} from '../../../lib/xs2event';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,10 +35,19 @@ export async function GET(request: NextRequest) {
       data: sports,
     });
   } catch (error) {
-    console.error(
-      'XS2Event test connection failed:',
-      error instanceof Error ? error.name : 'Unknown error'
-    );
+    if (error instanceof XS2EventAPIError) {
+      console.error(
+        'XS2Event supplier HTTP status:',
+        error.status
+      );
+    } else {
+      console.error(
+        'XS2Event test connection failed:',
+        error instanceof Error
+          ? error.name
+          : 'Unknown error'
+      );
+    }
 
     return NextResponse.json(
       {
