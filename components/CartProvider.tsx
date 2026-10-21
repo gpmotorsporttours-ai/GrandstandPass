@@ -9,6 +9,13 @@ import {
   type ReactNode,
 } from 'react';
 
+export type DisplayCurrency =
+  | 'ZAR'
+  | 'EUR'
+  | 'USD'
+  | 'GBP'
+  | 'AED';
+
 export type CartItem = {
   id: string;
   eventId: string;
@@ -31,13 +38,39 @@ type CartContextType = {
   itemCount: number;
   total: number | null;
   currency: string | null;
+  displayCurrency: DisplayCurrency;
+  setDisplayCurrency: (currency: DisplayCurrency) => void;
 };
 
 const CartContext = createContext<CartContextType | undefined>(
   undefined
 );
 
-const STORAGE_KEY = 'grandstand-pass-cart';
+const CART_STORAGE_KEY = 'grandstand-pass-cart';
+
+const CURRENCY_STORAGE_KEY =
+  'grandstand-pass-display-currency';
+
+const DEFAULT_CURRENCY: DisplayCurrency = 'EUR';
+
+export const DISPLAY_CURRENCIES: DisplayCurrency[] = [
+  'ZAR',
+  'EUR',
+  'USD',
+  'GBP',
+  'AED',
+];
+
+function isDisplayCurrency(
+  value: unknown
+): value is DisplayCurrency {
+  return (
+    typeof value === 'string' &&
+    DISPLAY_CURRENCIES.some(
+      (currency) => currency === value
+    )
+  );
+}
 
 function isCartItem(value: unknown): value is CartItem {
   if (
@@ -76,9 +109,14 @@ export function CartProvider({
   const [items, setItems] = useState<CartItem[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  const [displayCurrency, setDisplayCurrencyState] =
+    useState<DisplayCurrency>(DEFAULT_CURRENCY);
+
   useEffect(() => {
     try {
-      const savedCart = localStorage.getItem(STORAGE_KEY);
+      const savedCart = localStorage.getItem(
+        CART_STORAGE_KEY
+      );
 
       if (savedCart) {
         const parsed: unknown = JSON.parse(savedCart);
@@ -88,7 +126,25 @@ export function CartProvider({
         }
       }
     } catch (error) {
-      console.error('Unable to load shopping cart:', error);
+      console.error(
+        'Unable to load shopping cart:',
+        error
+      );
+    }
+
+    try {
+      const savedCurrency = localStorage.getItem(
+        CURRENCY_STORAGE_KEY
+      );
+
+      if (isDisplayCurrency(savedCurrency)) {
+        setDisplayCurrencyState(savedCurrency);
+      }
+    } catch (error) {
+      console.error(
+        'Unable to load display currency:',
+        error
+      );
     } finally {
       setIsLoaded(true);
     }
@@ -101,13 +157,44 @@ export function CartProvider({
 
     try {
       localStorage.setItem(
-        STORAGE_KEY,
+        CART_STORAGE_KEY,
         JSON.stringify(items)
       );
     } catch (error) {
-      console.error('Unable to save shopping cart:', error);
+      console.error(
+        'Unable to save shopping cart:',
+        error
+      );
     }
   }, [items, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        CURRENCY_STORAGE_KEY,
+        displayCurrency
+      );
+    } catch (error) {
+      console.error(
+        'Unable to save display currency:',
+        error
+      );
+    }
+  }, [displayCurrency, isLoaded]);
+
+  const setDisplayCurrency = (
+    nextCurrency: DisplayCurrency
+  ) => {
+    if (!isDisplayCurrency(nextCurrency)) {
+      return;
+    }
+
+    setDisplayCurrencyState(nextCurrency);
+  };
 
   const addItem = (newItem: CartItem) => {
     if (!isCartItem(newItem)) {
@@ -179,7 +266,9 @@ export function CartProvider({
 
   const currencies = [
     ...new Set(
-      items.map((item) => item.currency).filter(Boolean)
+      items
+        .map((item) => item.currency)
+        .filter(Boolean)
     ),
   ];
 
@@ -217,6 +306,8 @@ export function CartProvider({
         itemCount,
         total,
         currency,
+        displayCurrency,
+        setDisplayCurrency,
       }}
     >
       {children}
