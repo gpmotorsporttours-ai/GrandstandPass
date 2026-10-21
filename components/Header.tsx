@@ -11,9 +11,12 @@ import {
   ShoppingCart,
   Globe2,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { sports, sportSlug } from '../lib/data';
-import { useCart } from './CartProvider';
+import {
+  useCart,
+  type DisplayCurrency,
+} from './CartProvider';
 
 const otherSports = [
   'Basketball',
@@ -25,7 +28,10 @@ const otherSports = [
   'Rugby',
 ];
 
-const currencies = [
+const currencies: {
+  code: DisplayCurrency;
+  label: string;
+}[] = [
   { code: 'ZAR', label: '🇿🇦 ZAR' },
   { code: 'EUR', label: '🇪🇺 EUR' },
   { code: 'USD', label: '🇺🇸 USD' },
@@ -33,45 +39,14 @@ const currencies = [
   { code: 'AED', label: '🇦🇪 AED' },
 ];
 
-const CURRENCY_STORAGE_KEY =
-  'grandstand-pass-display-currency';
-
 export default function Header() {
   const [open, setOpen] = useState(false);
-  const [currency, setCurrency] = useState('EUR');
-  const { itemCount } = useCart();
 
-  useEffect(() => {
-    try {
-      const savedCurrency = window.localStorage.getItem(
-        CURRENCY_STORAGE_KEY
-      );
-
-      if (
-        savedCurrency &&
-        currencies.some(
-          (item) => item.code === savedCurrency
-        )
-      ) {
-        setCurrency(savedCurrency);
-      }
-    } catch {
-      // The selector still works if browser storage is unavailable.
-    }
-  }, []);
-
-  const handleCurrencyChange = (nextCurrency: string) => {
-    setCurrency(nextCurrency);
-
-    try {
-      window.localStorage.setItem(
-        CURRENCY_STORAGE_KEY,
-        nextCurrency
-      );
-    } catch {
-      // The selection remains available for this page.
-    }
-  };
+  const {
+    itemCount,
+    displayCurrency,
+    setDisplayCurrency,
+  } = useCart();
 
   return (
     <header className="bg-white border-b border-slate-100 sticky top-0 z-30">
@@ -163,9 +138,11 @@ export default function Header() {
             />
 
             <select
-              value={currency}
+              value={displayCurrency}
               onChange={(event) =>
-                handleCurrencyChange(event.target.value)
+                setDisplayCurrency(
+                  event.target.value as DisplayCurrency
+                )
               }
               aria-label="Preferred display currency"
               title="Display currency preference; prices are not converted yet"
