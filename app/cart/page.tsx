@@ -1,6 +1,7 @@
 
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -15,16 +16,32 @@ import { useCart } from '../../components/CartProvider';
 import {
   formatCurrency,
   isSupportedCurrency,
+  type SupportedCurrency,
 } from '../../lib/currency';
+
+type ConvertedPrice = {
+  supplierAmount: number;
+  supplierCurrency: SupportedCurrency;
+  displayAmount: number;
+  displayCurrency: SupportedCurrency;
+  exchangeRate: number;
+  rateDate: string;
+  converted: boolean;
+  indicative: true;
+};
+
+type PricingState = {
+  requestKey: string;
+  prices: Record<string, ConvertedPrice>;
+  loading: boolean;
+  failed: boolean;
+};
 
 function formatOriginalPrice(
   amount: number,
   currency: string
 ): string {
-  if (
-    !Number.isFinite(amount) ||
-    amount < 0
-  ) {
+  if (!Number.isFinite(amount) || amount < 0) {
     return 'Price unavailable';
   }
 
@@ -44,6 +61,18 @@ function formatOriginalPrice(
   }
 }
 
+function isValidPrice(
+  price: unknown,
+  currency: unknown
+): currency is SupportedCurrency {
+  return (
+    typeof price === 'number' &&
+    Number.isFinite(price) &&
+    price > 0 &&
+    isSupportedCurrency(currency)
+  );
+}
+
 export default function CartPage() {
   const {
     items,
@@ -51,28 +80,165 @@ export default function CartPage() {
     updateQuantity,
     clearCart,
     itemCount,
-    total,
-    currency,
     displayCurrency,
   } = useCart();
 
-  const hasPricedItems = items.some(
-    (item) =>
-      typeof item.price === 'number' &&
-      Number.isFinite(item.price) &&
-      item.price >= 0 &&
-      typeof item.currency === 'string' &&
-      item.currency.length > 0
+  const [pricingState, setPricingState] =
+    useState<PricingState | null>(null);
+
+  const requestKey = JSON.stringify({
+    displayCurrency,
+    tickets: items.map((item) => ({
+      id: item.id,
+      price: item.price,
+      currency: item.currency,
+    })),
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const pricedItems = items.filter((item) =>
+      isValidPrice(item.price, item.currency)
+    );
+
+    if (pricedItems.length === 0) {
+      return;
+    }
+
+    async function loadPrices() {
+      setPricingState({
+        requestKey,
+        prices: {},
+        loading: true,
+        failed: false,
+      });
+
+      try {
+        const results = await Promise.all(
+          pricedItems.map(async (item) => {
+            const params = new URLSearchParams({
+              amount: String(item.price),
+              from: item.currency!,
+              to: displayCurrency,
+            });
+
+            const response = await fetch(
+              `/api/cart-pricing?${params.toString()}`,
+              { cache: 'no-store' }
+            );
+
+            if (!response.ok) {
+              throw new Error('Conversion unavailable');
+            }
+
+            const data = await response.json();
+
+            if (
+              data.success !== true ||
+              !data.pricing ||
+              data.pricing.supplierAmount !== item.price ||
+              data.pricing.supplierCurrency !== item.currency ||
+              data.pricing.displayCurrency !== displayCurrency ||
+              typeof data.pricing.displayAmount !== 'number' ||
+              !Number.isFinite(data.pricing.displayAmount) ||
+              data.pricing.displayAmount < 0 ||
+              typeof data.pricing.exchangeRate !== 'number' ||
+              !Number.isFinite(data.pricing.exchangeRate) ||
+              data.pricing.exchangeRate <= 0 ||
+              typeof data.pricing.rateDate !== 'string' ||
+              data.pricing.indicative !== true
+            ) {
+              throw new Error('Invalid conversion response');
+            }
+
+            return {
+              id: item.id,
+              pricing: data.pricing as ConvertedPrice,
+            };
+          })
+        );
+
+        if (cancelled) return;
+
+        const prices: Record<string, ConvertedPrice> = {};
+
+        for (const result of results) {
+          prices[result.id] = result.pricing;
+        }
+
+        setPricingState({
+          requestKey,
+          prices,
+          loading: false,
+          failed: false,
+        });
+      } catch {
+        if (cancelled) return;
+
+        setPricingState({
+          requestKey,
+          prices: {},
+          loading: false,
+          failed: true,
+        });
+      }
+    }
+
+    void loadPrices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestKey, displayCurrency, items]);
+
+  const hasPricedItems = items.some((item) =>
+    isValidPrice(item.price, item.currency)
   );
 
-  const hasDifferentCurrency = items.some(
-    (item) =>
-      typeof item.price === 'number' &&
-      Number.isFinite(item.price) &&
-      item.price >= 0 &&
-      item.currency &&
-      item.currency !== displayCurrency
-  );
+  const allItemsPriced =
+    items.length > 0 &&
+    items.every((item) =>
+      isValidPrice(item.price, item.currency)
+    );
+
+  const currentPricing =
+    pricingState?.requestKey === requestKey
+      ? pricingState
+      : null;
+
+  const conversionReady =
+    allItemsPriced &&
+    currentPricing !== null &&
+    !currentPricing.loading &&
+    !currentPricing.failed &&
+    items.every((item) =>
+      Object.prototype.hasOwnProperty.call(
+        currentPricing.prices,
+        item.id
+      )
+    );
+
+  const convertedTotal = conversionReady
+    ? items.reduce((sum, item) => {
+        return (
+          sum +
+          currentPricing!.prices[item.id].displayAmount *
+            item.quantity
+        );
+      }, 0)
+    : null;
+
+  const rateDates = conversionReady
+    ? Array.from(
+        new Set(
+          items.map(
+            (item) =>
+              currentPricing!.prices[item.id].rateDate
+          )
+        )
+      )
+    : [];
 
   return (
     <>
@@ -134,12 +300,15 @@ export default function CartPage() {
           <div className="grid lg:grid-cols-3 gap-8 items-start">
             <div className="lg:col-span-2 space-y-5">
               {items.map((item) => {
-                const hasPrice =
-                  typeof item.price === 'number' &&
-                  Number.isFinite(item.price) &&
-                  item.price >= 0 &&
-                  typeof item.currency === 'string' &&
-                  item.currency.length > 0;
+                const hasPrice = isValidPrice(
+                  item.price,
+                  item.currency
+                );
+
+                const convertedPrice =
+                  hasPrice && currentPricing
+                    ? currentPricing.prices[item.id]
+                    : undefined;
 
                 return (
                   <div
@@ -235,26 +404,52 @@ export default function CartPage() {
                     </div>
 
                     <div className="mt-4 text-sm font-semibold text-navy">
-                      {hasPrice && item.currency ? (
+                      {hasPrice ? (
                         <>
-                          Unit price:{' '}
-                          {formatOriginalPrice(
-                            item.price!,
-                            item.currency
-                          )}
+                          <p>
+                            Original unit price:{' '}
+                            {formatOriginalPrice(
+                              item.price!,
+                              item.currency!
+                            )}
+                          </p>
 
-                          {item.currency !==
-                            displayCurrency && (
+                          {convertedPrice ? (
+                            <div className="mt-2">
+                              <p className="text-blue font-bold">
+                                Indicative unit price:{' '}
+                                {formatCurrency(
+                                  convertedPrice.displayAmount,
+                                  displayCurrency
+                                )}
+                              </p>
+
+                              <p className="muted text-xs font-normal mt-1">
+                                Exchange-rate date:{' '}
+                                {convertedPrice.rateDate}
+                              </p>
+
+                              <p className="muted text-xs font-normal mt-1">
+                                Indicative line subtotal:{' '}
+                                {formatCurrency(
+                                  convertedPrice.displayAmount *
+                                    item.quantity,
+                                  displayCurrency
+                                )}
+                              </p>
+                            </div>
+                          ) : (
                             <p className="muted text-xs font-normal mt-2">
-                              Original ticket currency:{' '}
-                              {item.currency}. Conversion
-                              to {displayCurrency} is not
-                              available yet.
+                              {currentPricing?.failed
+                                ? 'Currency conversion is currently unavailable.'
+                                : 'Calculating indicative price...'}
                             </p>
                           )}
                         </>
                       ) : (
-                        'Price: Awaiting live supplier pricing'
+                        <p>
+                          Price: Awaiting live supplier pricing
+                        </p>
                       )}
                     </div>
                   </div>
@@ -299,30 +494,54 @@ export default function CartPage() {
 
                 <div className="flex justify-between gap-4">
                   <span className="muted">
-                    Total price
+                    Indicative total
                   </span>
 
                   <span className="font-bold text-navy text-right">
-                    {total !== null && currency
-                      ? formatOriginalPrice(
-                          total,
-                          currency
+                    {convertedTotal !== null
+                      ? formatCurrency(
+                          convertedTotal,
+                          displayCurrency
                         )
-                      : 'Awaiting live pricing'}
+                      : allItemsPriced
+                        ? currentPricing?.failed
+                          ? 'Conversion unavailable'
+                          : 'Calculating...'
+                        : 'Awaiting live pricing'}
                   </span>
                 </div>
               </div>
 
+              {convertedTotal !== null && (
+                <p className="text-xs muted mt-4">
+                  Indicative converted total only.
+                  Final ticket prices may differ.
+                  {rateDates.length > 0 && (
+                    <>
+                      {' '}Exchange-rate date
+                      {rateDates.length > 1 ? 's' : ''}:{' '}
+                      {rateDates.join(', ')}.
+                    </>
+                  )}
+                </p>
+              )}
+
               {hasPricedItems &&
-                hasDifferentCurrency && (
+                !allItemsPriced && (
                   <p className="text-xs muted mt-4">
-                    Prices are currently displayed in
-                    their original ticket currencies.
-                    Conversion to {displayCurrency} will
-                    become available when verified
-                    exchange rates are connected.
+                    Some tickets are awaiting live
+                    supplier pricing. A complete order
+                    total cannot be calculated yet.
                   </p>
                 )}
+
+              {currentPricing?.failed && (
+                <p className="text-xs text-red-600 mt-4">
+                  Currency conversion is temporarily
+                  unavailable. Original ticket prices
+                  have been preserved.
+                </p>
+              )}
 
               <button
                 type="button"
