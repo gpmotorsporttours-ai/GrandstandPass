@@ -9,8 +9,9 @@ import {
   X,
   ChevronDown,
   ShoppingCart,
+  Globe2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { sports, sportSlug } from '../lib/data';
 import { useCart } from './CartProvider';
 
@@ -24,9 +25,53 @@ const otherSports = [
   'Rugby',
 ];
 
+const currencies = [
+  { code: 'ZAR', label: '🇿🇦 ZAR' },
+  { code: 'EUR', label: '🇪🇺 EUR' },
+  { code: 'USD', label: '🇺🇸 USD' },
+  { code: 'GBP', label: '🇬🇧 GBP' },
+  { code: 'AED', label: '🇦🇪 AED' },
+];
+
+const CURRENCY_STORAGE_KEY =
+  'grandstand-pass-display-currency';
+
 export default function Header() {
   const [open, setOpen] = useState(false);
+  const [currency, setCurrency] = useState('EUR');
   const { itemCount } = useCart();
+
+  useEffect(() => {
+    try {
+      const savedCurrency = window.localStorage.getItem(
+        CURRENCY_STORAGE_KEY
+      );
+
+      if (
+        savedCurrency &&
+        currencies.some(
+          (item) => item.code === savedCurrency
+        )
+      ) {
+        setCurrency(savedCurrency);
+      }
+    } catch {
+      // The selector still works if browser storage is unavailable.
+    }
+  }, []);
+
+  const handleCurrencyChange = (nextCurrency: string) => {
+    setCurrency(nextCurrency);
+
+    try {
+      window.localStorage.setItem(
+        CURRENCY_STORAGE_KEY,
+        nextCurrency
+      );
+    } catch {
+      // The selection remains available for this page.
+    }
+  };
 
   return (
     <header className="bg-white border-b border-slate-100 sticky top-0 z-30">
@@ -92,7 +137,7 @@ export default function Header() {
           </div>
         </nav>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-3">
             <Link
               href="/#events"
@@ -111,10 +156,36 @@ export default function Header() {
             </span>
           </div>
 
+          <div className="flex items-center gap-1.5 border border-slate-200 rounded-xl px-2 py-2 hover:border-blue transition">
+            <Globe2
+              size={17}
+              className="text-slate-500 hidden sm:block"
+            />
+
+            <select
+              value={currency}
+              onChange={(event) =>
+                handleCurrencyChange(event.target.value)
+              }
+              aria-label="Preferred display currency"
+              title="Display currency preference; prices are not converted yet"
+              className="bg-transparent text-xs sm:text-sm font-bold text-navy cursor-pointer outline-none max-w-[82px]"
+            >
+              {currencies.map((item) => (
+                <option
+                  key={item.code}
+                  value={item.code}
+                >
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <Link
             href="/cart"
             aria-label={`Shopping cart with ${itemCount} tickets`}
-            className="relative flex items-center justify-center w-11 h-11 rounded-xl border border-slate-200 hover:border-blue hover:text-blue transition"
+            className="relative flex items-center justify-center w-11 h-11 rounded-xl border border-slate-200 hover:border-blue hover:text-blue transition shrink-0"
           >
             <ShoppingCart size={21} />
 
