@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { CheckCircle2, ShoppingCart, Ticket } from 'lucide-react';
 import { useCart } from './CartProvider';
 import { formatCurrency, isSupportedCurrency } from '../lib/currency';
 
@@ -48,8 +50,7 @@ export default function SupplierTestCartButton({
     Number.isFinite(sellingPrice) &&
     sellingPrice > 0;
 
-  // An earlier version stored supplier net prices in the same cart ID.
-  // Require removal before a newly priced ticket can be added.
+  // Protect existing carts from old net-priced or differently priced entries.
   const staleCartItem = Boolean(
     existingItem &&
     (!validSellingPrice ||
@@ -94,6 +95,14 @@ export default function SupplierTestCartButton({
     Math.max(minimumQuantity, remainingQuantity)
   );
 
+  const indicativeTotal =
+    validSellingPrice && isSupportedCurrency(currency)
+      ? formatCurrency(
+          Math.round(sellingPrice! * selectedQuantity * 100) / 100,
+          currency
+        )
+      : null;
+
   function handleAddToCart() {
     if (!canAdd || !isSupportedCurrency(currency) || !validSellingPrice) {
       return;
@@ -125,43 +134,33 @@ export default function SupplierTestCartButton({
   }
 
   return (
-    <div
-      style={{
-        marginTop: '16px',
-        padding: '16px',
-        border: '1px solid #bfdbfe',
-        borderRadius: '10px',
-        background: '#ffffff',
-        color: '#111827',
-      }}
-    >
-      <h5 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 8px' }}>
-        Test Shopping Cart
-      </h5>
-      <p style={{ fontSize: '13px', lineHeight: 1.6, color: '#475569', margin: '0 0 12px' }}>
-        Add this XS2Event test offer to your development cart. No supplier
-        reservation or payment will be created.
-      </p>
+    <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+          <Ticket size={20} aria-hidden="true" />
+        </span>
+        <div>
+          <h4 className="text-lg font-extrabold text-navy">Select your tickets</h4>
+          <p className="mt-1 text-sm text-slate-600">
+            Choose a quantity to add to your test cart.
+          </p>
+        </div>
+      </div>
 
-      <p style={{ margin: '0 0 12px', fontSize: '14px' }}>
-        <strong>Indicative Grandstand Pass price:</strong>{' '}
-        {validSellingPrice && isSupportedCurrency(currency)
-          ? formatCurrency(sellingPrice!, currency)
-          : 'Awaiting verified calculation'}{' '}
-        per ticket
-      </p>
-
-      <p style={{ margin: '0 0 12px', fontSize: '13px' }}>
-        <strong>Already in cart:</strong> {alreadyInCart}
-        {' | '}
-        <strong>Remaining test quantity:</strong> {remainingQuantity}
-      </p>
+      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600">
+        <span>
+          <strong className="text-navy">In cart:</strong> {alreadyInCart}
+        </span>
+        <span>
+          <strong className="text-navy">Remaining:</strong> {remainingQuantity}
+        </span>
+      </div>
 
       {staleCartItem && (
-        <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '8px', background: '#fef3c7', color: '#92400e' }}>
-          <p style={{ fontSize: '13px', margin: '0 0 10px' }}>
-            An older or differently priced version of this test ticket is in your cart.
-            Remove it before adding this offer at the current indicative price.
+        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <p>
+            An older or differently priced version of this test ticket is in
+            your cart. Remove it before adding the current offer.
           </p>
           <button
             type="button"
@@ -169,7 +168,7 @@ export default function SupplierTestCartButton({
               removeItem(cartItemId);
               setMessage('Older test ticket removed.');
             }}
-            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #92400e', background: '#ffffff', color: '#92400e', fontWeight: 700, cursor: 'pointer' }}
+            className="mt-3 rounded-lg border border-amber-700 bg-white px-4 py-2 font-bold text-amber-900 hover:bg-amber-100"
           >
             Remove older test ticket
           </button>
@@ -180,9 +179,9 @@ export default function SupplierTestCartButton({
         <>
           <label
             htmlFor={`quantity-${ticketId}`}
-            style={{ display: 'block', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}
+            className="mt-5 block text-sm font-bold text-navy"
           >
-            Quantity
+            Number of tickets
           </label>
           <select
             id={`quantity-${ticketId}`}
@@ -191,25 +190,41 @@ export default function SupplierTestCartButton({
               setQuantity(Number(event.target.value));
               setMessage('');
             }}
-            style={{ display: 'block', width: '100%', padding: '10px', marginBottom: '12px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#ffffff', color: '#111827' }}
+            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-navy"
           >
             {Array.from(
               { length: remainingQuantity - minimumQuantity + 1 },
               (_, index) => minimumQuantity + index
             ).map(value => (
-              <option key={value} value={value}>{value}</option>
+              <option key={value} value={value}>
+                {value} {value === 1 ? 'ticket' : 'tickets'}
+              </option>
             ))}
           </select>
+
+          <div className="mt-4 flex items-center justify-between gap-4 rounded-lg bg-ice p-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                Indicative total
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {selectedQuantity} {selectedQuantity === 1 ? 'ticket' : 'tickets'}
+              </p>
+            </div>
+            <p className="text-2xl font-black text-navy">{indicativeTotal}</p>
+          </div>
+
           <button
             type="button"
             onClick={handleAddToCart}
-            style={{ width: '100%', padding: '12px 16px', border: 'none', borderRadius: '8px', background: '#1769e0', color: '#ffffff', fontWeight: 800, cursor: 'pointer' }}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue px-4 py-4 font-extrabold text-white transition hover:opacity-90"
           >
+            <ShoppingCart size={20} aria-hidden="true" />
             Add to Test Cart
           </button>
         </>
       ) : !staleCartItem ? (
-        <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>
+        <p className="mt-5 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
           {validSellingPrice
             ? 'This offer cannot currently be added. The stock limit may have been reached, or the supplier details may be incomplete.'
             : 'Test cart temporarily unavailable until the Grandstand Pass selling price is passed from the server.'}
@@ -217,14 +232,21 @@ export default function SupplierTestCartButton({
       ) : null}
 
       {message && (
-        <p role="status" style={{ margin: '12px 0 0', fontSize: '13px', fontWeight: 700, color: '#166534' }}>
-          {message}
-        </p>
+        <div role="status" className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+          <p className="flex items-center gap-2 font-bold">
+            <CheckCircle2 size={18} aria-hidden="true" />
+            {message}
+          </p>
+          <Link href="/cart" className="mt-2 inline-block font-bold underline">
+            View shopping cart →
+          </Link>
+        </div>
       )}
 
-      <p style={{ fontSize: '12px', color: '#64748b', lineHeight: 1.6, margin: '12px 0 0' }}>
-        TEST DATA — NOT FOR SALE. Prices are indicative and not confirmed for
-        checkout. Supplier availability can change. Checkout remains disabled.
+      <p className="mt-4 text-xs leading-relaxed text-slate-500">
+        <strong>TEST DATA — NOT FOR SALE.</strong> Prices are indicative,
+        availability may change, and no supplier reservation or payment is
+        created. Checkout remains disabled.
       </p>
     </div>
   );
