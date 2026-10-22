@@ -3,6 +3,7 @@ import { xs2eventGet } from '../../lib/xs2event';
 import SupplierCurrencyPreview from '../../components/SupplierCurrencyPreview';
 import SupplierTestCartButton from '../../components/SupplierTestCartButton';
 import SupplierSellingPricePreview from '../../components/SupplierSellingPricePreview';
+import { calculateSupplierTicketPrice } from '../../lib/supplierPricing';
 import {
   getTicketDisplayPrice,
   type TicketDisplayPrice,
@@ -80,6 +81,7 @@ type PreviewPrice = {
 
 type TicketWithPrices = SupplierTicket & {
   previewPrices: PreviewPrice[];
+  sellingPrice: number | null;
 };
 
 type EventWithTickets = {
@@ -193,6 +195,7 @@ async function addPreviewPrices(
     return {
       ...ticket,
       previewPrices: [],
+      sellingPrice: null,
     };
   }
 
@@ -227,9 +230,43 @@ async function addPreviewPrices(
     })
   );
 
+  // Use the same server-side pricing rules as the green selling-price preview.
+  // Never substitute the supplier net rate if FX or pricing is unavailable.
+  let sellingPrice: number | null = null;
+  if (typeof ticket.net_rate === 'number' && Number.isSafeInteger(ticket.net_rate)) {
+    try {
+      let eurToSupplierRate: number | undefined;
+      if (sourceCurrency !== 'EUR') {
+        const conversion = await getTicketDisplayPrice(
+          { amount: 1, currency: 'EUR' },
+          sourceCurrency
+        );
+        if (
+          conversion &&
+          Number.isFinite(conversion.displayAmount) &&
+          conversion.displayAmount > 0
+        ) {
+          eurToSupplierRate = conversion.displayAmount;
+        }
+      }
+      const breakdown = calculateSupplierTicketPrice({
+        netRateMinor: ticket.net_rate,
+        supplierCurrency: sourceCurrency,
+        eurToSupplierRate,
+      });
+      if (breakdown) {
+        // Cart amounts are in major units, rounded to the nearest minor unit.
+        sellingPrice = Math.round((breakdown.indicativeSellingPrice + Number.EPSILON) * 100) / 100;
+      }
+    } catch {
+      sellingPrice = null;
+    }
+  }
+
   return {
     ...ticket,
     previewPrices,
+    sellingPrice,
   };
 }
 
@@ -544,6 +581,7 @@ function TicketOffer({
           stock={ticket.stock}
           minOrder={ticket.min_order ?? 1}
           price={ticket.net_rate / 100}
+          sellingPrice={ticket.sellingPrice}
           currency={ticket.currency_code}
           rawNetRate={ticket.net_rate}
           rawFaceValue={
