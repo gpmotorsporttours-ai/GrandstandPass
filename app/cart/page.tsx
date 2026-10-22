@@ -94,7 +94,6 @@ export default function CartPage() {
       currency: item.currency,
       supplier: item.supplier,
       supplierEnvironment: item.supplierEnvironment,
-      supplierRawNetRate: item.supplierRawNetRate,
     })),
   });
 
@@ -178,27 +177,8 @@ export default function CartPage() {
             }
             const supplierCurrency = item.currency;
 
-            const supplierTest =
-              item.supplier === 'XS2Event' &&
-              item.supplierEnvironment === 'test';
-
-            // New test-cart entries already contain the selling price.
-            // Older entries saved the supplier net rate instead.
-            if (supplierTest) {
-              if (
-                !Number.isSafeInteger(item.supplierRawNetRate) ||
-                (item.supplierRawNetRate ?? 0) <= 0
-              ) {
-                throw new Error('Missing supplier net rate');
-              }
-              if (
-                Math.abs(
-                  item.price! - item.supplierRawNetRate! / 100
-                ) < 0.005
-              ) {
-                throw new Error('Old supplier-net cart entry');
-              }
-            }
+            // Cart prices are already Grandstand Pass selling prices.
+            // Supplier net rates are not required or stored for new tickets.
 
             const pricing = await convertAmount(
               item.price!,
@@ -501,18 +481,6 @@ export default function CartPage() {
                             )}
                           </p>
 
-                          {isSupplierTestTicket &&
-                            typeof item.supplierRawNetRate === 'number' &&
-                            Math.abs(
-                              item.price! - item.supplierRawNetRate / 100
-                            ) < 0.005 && (
-                              <p className="mt-2 text-xs text-red-600">
-                                This ticket was saved at the old supplier net
-                                price. Remove it and add it again to use the
-                                Grandstand Pass selling price.
-                              </p>
-                            )}
-
                           {convertedPrice ? (
                             <div className="mt-2">
                               <p className="text-blue font-bold">
@@ -654,10 +622,9 @@ export default function CartPage() {
 
               {currentPricing?.failed && (
                 <p className="text-xs text-red-600 mt-4">
-                  Pricing is unavailable. If this is an older
-                  XS2Event test ticket, remove it and add it again.
-                  Otherwise, currency conversion may be temporarily
-                  unavailable. Original stored prices have been preserved.
+                  Pricing is currently unavailable. Please try again
+                  shortly. Your cart selections and stored selling prices
+                  have been preserved.
                 </p>
               )}
 
