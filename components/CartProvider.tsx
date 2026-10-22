@@ -83,6 +83,14 @@ function isOptionalNonNegativeNumber(
   );
 }
 
+/** Remove supplier cost information from cart state and browser storage. */
+function sanitizeCartItem(item: CartItem): CartItem {
+  const { supplierRawNetRate: _netRate, supplierRawFaceValue: _faceValue, ...safeItem } = item;
+  void _netRate;
+  void _faceValue;
+  return safeItem;
+}
+
 function isOptionalPositiveInteger(
   value: unknown
 ): boolean {
@@ -249,7 +257,7 @@ export function CartProvider({
 
         if (Array.isArray(parsed)) {
           setItems(
-            parsed.filter(isCartItem)
+            parsed.filter(isCartItem).map(sanitizeCartItem)
           );
         }
       }
@@ -293,7 +301,7 @@ export function CartProvider({
     try {
       localStorage.setItem(
         CART_STORAGE_KEY,
-        JSON.stringify(items)
+        JSON.stringify(items.map(sanitizeCartItem))
       );
     } catch (error) {
       console.error(
@@ -347,18 +355,20 @@ export function CartProvider({
       return;
     }
 
+    const safeNewItem = sanitizeCartItem(newItem);
+
     setItems((currentItems) => {
       const existingItem =
         currentItems.find(
           (item) =>
-            item.id === newItem.id
+            item.id === safeNewItem.id
         );
 
       if (existingItem) {
         return currentItems.map(
           (item) => {
             if (
-              item.id !== newItem.id
+              item.id !== safeNewItem.id
             ) {
               return item;
             }
@@ -367,14 +377,14 @@ export function CartProvider({
             // offers that share a cart ID.
             if (
               item.supplierTicketId !==
-              newItem.supplierTicketId
+              safeNewItem.supplierTicketId
             ) {
               return item;
             }
 
             const maxQuantity = Math.min(
               getItemQuantityLimit(item),
-              getItemQuantityLimit(newItem)
+              getItemQuantityLimit(safeNewItem)
             );
 
             return {
@@ -386,7 +396,7 @@ export function CartProvider({
               quantity: Math.min(
                 maxQuantity,
                 item.quantity +
-                  newItem.quantity
+                  safeNewItem.quantity
               ),
             };
           }
@@ -395,7 +405,7 @@ export function CartProvider({
 
       return [
         ...currentItems,
-        newItem,
+        safeNewItem,
       ];
     });
   };
