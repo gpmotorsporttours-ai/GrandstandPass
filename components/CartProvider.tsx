@@ -29,6 +29,16 @@ export type CartItem = {
   quantity: number;
   price?: number;
   currency?: string;
+
+  // Optional supplier details.
+  // Existing cart items do not need these fields.
+  supplier?: 'XS2Event';
+  supplierTicketId?: string;
+  supplierCategoryId?: string;
+  supplierEnvironment?: 'test';
+  supplierRawNetRate?: number;
+  supplierRawFaceValue?: number;
+  maxQuantity?: number;
 };
 
 type CartContextType = {
@@ -55,8 +65,36 @@ const CART_STORAGE_KEY =
 const CURRENCY_STORAGE_KEY =
   'grandstand-pass-display-currency';
 
+const MAX_CART_QUANTITY = 10;
+
 export const DISPLAY_CURRENCIES:
   DisplayCurrency[] = [...SUPPORTED_CURRENCIES];
+
+function isOptionalNonNegativeNumber(
+  value: unknown
+): boolean {
+  return (
+    value === undefined ||
+    (
+      typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value >= 0
+    )
+  );
+}
+
+function isOptionalPositiveInteger(
+  value: unknown
+): boolean {
+  return (
+    value === undefined ||
+    (
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 1
+    )
+  );
+}
 
 function isCartItem(value: unknown): value is CartItem {
   if (
@@ -68,17 +106,73 @@ function isCartItem(value: unknown): value is CartItem {
 
   const item = value as Partial<CartItem>;
 
+  const validSupplierDetails =
+    (
+      item.supplier === undefined ||
+      item.supplier === 'XS2Event'
+    ) &&
+    (
+      item.supplierTicketId === undefined ||
+      (
+        typeof item.supplierTicketId === 'string' &&
+        item.supplierTicketId.length > 0
+      )
+    ) &&
+    (
+      item.supplierCategoryId === undefined ||
+      typeof item.supplierCategoryId === 'string'
+    ) &&
+    (
+      item.supplierEnvironment === undefined ||
+      item.supplierEnvironment === 'test'
+    ) &&
+    isOptionalNonNegativeNumber(
+      item.supplierRawNetRate
+    ) &&
+    isOptionalNonNegativeNumber(
+      item.supplierRawFaceValue
+    ) &&
+    isOptionalPositiveInteger(
+      item.maxQuantity
+    );
+
+  const validTestTicket =
+    item.supplier !== 'XS2Event' ||
+    (
+      item.supplierEnvironment === 'test' &&
+      typeof item.supplierTicketId === 'string' &&
+      item.supplierTicketId.length > 0 &&
+      item.id ===
+        `xs2event-test:${item.supplierTicketId}` &&
+      isSupportedCurrency(item.currency) &&
+      typeof item.price === 'number' &&
+      Number.isFinite(item.price) &&
+      item.price > 0 &&
+      typeof item.maxQuantity === 'number' &&
+      Number.isInteger(item.maxQuantity) &&
+      item.maxQuantity >= 1 &&
+      item.quantity !== undefined &&
+      item.quantity <= Math.min(
+        MAX_CART_QUANTITY,
+        item.maxQuantity
+      )
+    );
+
   return (
     typeof item.id === 'string' &&
     item.id.length > 0 &&
     typeof item.eventId === 'string' &&
+    item.eventId.length > 0 &&
     typeof item.eventName === 'string' &&
+    item.eventName.length > 0 &&
     typeof item.sport === 'string' &&
+    item.sport.length > 0 &&
     typeof item.category === 'string' &&
+    item.category.length > 0 &&
     typeof item.quantity === 'number' &&
     Number.isInteger(item.quantity) &&
     item.quantity >= 1 &&
-    item.quantity <= 10 &&
+    item.quantity <= MAX_CART_QUANTITY &&
     (
       item.price === undefined ||
       (
@@ -90,8 +184,27 @@ function isCartItem(value: unknown): value is CartItem {
     (
       item.currency === undefined ||
       typeof item.currency === 'string'
-    )
+    ) &&
+    validSupplierDetails &&
+    validTestTicket
   );
+}
+
+function getItemQuantityLimit(
+  item: CartItem
+): number {
+  if (
+    typeof item.maxQuantity === 'number' &&
+    Number.isInteger(item.maxQuantity) &&
+    item.maxQuantity >= 1
+  ) {
+    return Math.min(
+      MAX_CART_QUANTITY,
+      item.maxQuantity
+    );
+  }
+
+  return MAX_CART_QUANTITY;
 }
 
 function hasValidPricing(
@@ -230,43 +343,61 @@ export function CartProvider({
   const addItem = (
     newItem: CartItem
   ) => {
-    if (
-      !isCartItem(newItem)
-    ) {
+    if (!isCartItem(newItem)) {
       return;
     }
 
-    setItems(
-      (currentItems) => {
-        const existingItem =
-          currentItems.find(
-            (item) =>
-              item.id === newItem.id
-          );
+    setItems((currentItems) => {
+      const existingItem =
+        currentItems.find(
+          (item) =>
+            item.id === newItem.id
+        );
 
-        if (existingItem) {
-          return currentItems.map(
-            (item) =>
-              item.id === newItem.id
-                ? {
-                    ...item,
-                    quantity:
-                      Math.min(
-                        10,
-                        item.quantity +
-                          newItem.quantity
-                      ),
-                  }
-                : item
-          );
-        }
+      if (existingItem) {
+        return currentItems.map(
+          (item) => {
+            if (
+              item.id !== newItem.id
+            ) {
+              return item;
+            }
 
-        return [
-          ...currentItems,
-          newItem,
-        ];
+            // Do not combine unrelated supplier
+            // offers that share a cart ID.
+            if (
+              item.supplierTicketId !==
+              newItem.supplierTicketId
+            ) {
+              return item;
+            }
+
+            const maxQuantity = Math.min(
+              getItemQuantityLimit(item),
+              getItemQuantityLimit(newItem)
+            );
+
+            return {
+              ...item,
+              maxQuantity:
+                item.supplier === 'XS2Event'
+                  ? maxQuantity
+                  : item.maxQuantity,
+              quantity: Math.min(
+                maxQuantity,
+                item.quantity +
+                  newItem.quantity
+              ),
+            };
+          }
+        );
       }
-    );
+
+      return [
+        ...currentItems,
+        newItem,
+      ];
+    });
   };
 
   const removeItem = (
@@ -286,9 +417,7 @@ export function CartProvider({
     quantity: number
   ) => {
     if (
-      !Number.isInteger(
-        quantity
-      )
+      !Number.isInteger(quantity)
     ) {
       return;
     }
@@ -307,11 +436,10 @@ export function CartProvider({
             item.id === id
               ? {
                   ...item,
-                  quantity:
-                    Math.min(
-                      10,
-                      quantity
-                    ),
+                  quantity: Math.min(
+                    getItemQuantityLimit(item),
+                    quantity
+                  ),
                 }
               : item
         )
