@@ -14,6 +14,10 @@ import {
 
 import { useCart } from '../../components/CartProvider';
 import {
+  calculateSupplierTicketPrice,
+  type SupplierPricingBreakdown,
+} from '../../lib/supplierPricing';
+import {
   formatCurrency,
   isSupportedCurrency,
   type SupportedCurrency,
@@ -33,6 +37,7 @@ type ConvertedPrice = {
 type PricingState = {
   requestKey: string;
   prices: Record<string, ConvertedPrice>;
+  breakdowns: Record<string, SupplierPricingBreakdown>;
   loading: boolean;
   failed: boolean;
 };
@@ -92,6 +97,9 @@ export default function CartPage() {
       id: item.id,
       price: item.price,
       currency: item.currency,
+      supplier: item.supplier,
+      supplierEnvironment: item.supplierEnvironment,
+      supplierRawNetRate: item.supplierRawNetRate,
     })),
   });
 
@@ -110,66 +118,114 @@ export default function CartPage() {
       setPricingState({
         requestKey,
         prices: {},
+        breakdowns: {},
         loading: true,
         failed: false,
       });
 
       try {
+        async function convertAmount(
+          amount: number,
+          from: SupportedCurrency,
+          to: SupportedCurrency
+        ): Promise<ConvertedPrice> {
+          const params = new URLSearchParams({
+            amount: String(amount),
+            from,
+            to,
+          });
+          const response = await fetch(
+            `/api/cart-pricing?${params.toString()}`,
+            { cache: 'no-store' }
+          );
+          if (!response.ok) {
+            throw new Error('Currency conversion unavailable');
+          }
+          const data = await response.json();
+          if (
+            data.success !== true ||
+            !data.pricing ||
+            data.pricing.supplierAmount !== amount ||
+            data.pricing.supplierCurrency !== from ||
+            data.pricing.displayCurrency !== to ||
+            typeof data.pricing.displayAmount !== 'number' ||
+            !Number.isFinite(data.pricing.displayAmount) ||
+            data.pricing.displayAmount < 0 ||
+            typeof data.pricing.exchangeRate !== 'number' ||
+            !Number.isFinite(data.pricing.exchangeRate) ||
+            data.pricing.exchangeRate <= 0 ||
+            typeof data.pricing.rateDate !== 'string' ||
+            data.pricing.indicative !== true
+          ) {
+            throw new Error('Invalid currency conversion response');
+          }
+          return data.pricing as ConvertedPrice;
+        }
+
         const results = await Promise.all(
           pricedItems.map(async (item) => {
-            const params = new URLSearchParams({
-              amount: String(item.price),
-              from: item.currency!,
-              to: displayCurrency,
-            });
+            const supplierTest =
+              item.supplier === 'XS2Event' &&
+              item.supplierEnvironment === 'test';
 
-            const response = await fetch(
-              `/api/cart-pricing?${params.toString()}`,
-              { cache: 'no-store' }
+            let amount = item.price!;
+            let breakdown: SupplierPricingBreakdown | null = null;
+
+            if (supplierTest) {
+              if (
+                !Number.isSafeInteger(item.supplierRawNetRate) ||
+                (item.supplierRawNetRate ?? 0) <= 0 ||
+                Math.abs(item.price! * 100 - item.supplierRawNetRate!) > 0.01
+              ) {
+                throw new Error('Invalid supplier net rate');
+              }
+
+              let eurToSupplierRate: number | undefined;
+              if (item.currency !== 'EUR') {
+                const allowanceConversion = await convertAmount(
+                  5,
+                  'EUR',
+                  item.currency!
+                );
+                eurToSupplierRate = allowanceConversion.displayAmount / 5;
+              }
+
+              breakdown = calculateSupplierTicketPrice({
+                netRateMinor: item.supplierRawNetRate!,
+                supplierCurrency: item.currency!,
+                eurToSupplierRate,
+              });
+              if (!breakdown) {
+                throw new Error('Supplier selling price unavailable');
+              }
+              amount = breakdown.indicativeSellingPrice;
+            }
+
+            const pricing = await convertAmount(
+              amount,
+              item.currency!,
+              displayCurrency
             );
-
-            if (!response.ok) {
-              throw new Error('Conversion unavailable');
-            }
-
-            const data = await response.json();
-
-            if (
-              data.success !== true ||
-              !data.pricing ||
-              data.pricing.supplierAmount !== item.price ||
-              data.pricing.supplierCurrency !== item.currency ||
-              data.pricing.displayCurrency !== displayCurrency ||
-              typeof data.pricing.displayAmount !== 'number' ||
-              !Number.isFinite(data.pricing.displayAmount) ||
-              data.pricing.displayAmount < 0 ||
-              typeof data.pricing.exchangeRate !== 'number' ||
-              !Number.isFinite(data.pricing.exchangeRate) ||
-              data.pricing.exchangeRate <= 0 ||
-              typeof data.pricing.rateDate !== 'string' ||
-              data.pricing.indicative !== true
-            ) {
-              throw new Error('Invalid conversion response');
-            }
-
-            return {
-              id: item.id,
-              pricing: data.pricing as ConvertedPrice,
-            };
+            return { id: item.id, pricing, breakdown };
           })
         );
 
         if (cancelled) return;
 
         const prices: Record<string, ConvertedPrice> = {};
+        const breakdowns: Record<string, SupplierPricingBreakdown> = {};
 
         for (const result of results) {
           prices[result.id] = result.pricing;
+          if (result.breakdown) {
+            breakdowns[result.id] = result.breakdown;
+          }
         }
 
         setPricingState({
           requestKey,
           prices,
+          breakdowns,
           loading: false,
           failed: false,
         });
@@ -179,6 +235,7 @@ export default function CartPage() {
         setPricingState({
           requestKey,
           prices: {},
+          breakdowns: {},
           loading: false,
           failed: true,
         });
@@ -313,6 +370,9 @@ export default function CartPage() {
                 const isSupplierTestTicket =
                   item.supplier === 'XS2Event' &&
                   item.supplierEnvironment === 'test';
+
+                const sellingBreakdown =
+                  currentPricing?.breakdowns[item.id];
 
                 const quantityLimit =
                   isSupplierTestTicket &&
@@ -451,10 +511,38 @@ export default function CartPage() {
                             )}
                           </p>
 
+                          {isSupplierTestTicket && sellingBreakdown && (
+                            <div className="mt-2 text-sm font-normal space-y-1">
+                              <p>
+                                Handling allowance:{' '}
+                                {formatOriginalPrice(
+                                  sellingBreakdown.handlingAllowance,
+                                  item.currency!
+                                )}
+                              </p>
+                              <p>
+                                15% markup:{' '}
+                                {formatOriginalPrice(
+                                  sellingBreakdown.markupAmount,
+                                  item.currency!
+                                )}
+                              </p>
+                              <p className="font-bold text-navy">
+                                Indicative Grandstand Pass unit price:{' '}
+                                {formatOriginalPrice(
+                                  sellingBreakdown.indicativeSellingPrice,
+                                  item.currency!
+                                )}
+                              </p>
+                            </div>
+                          )}
+
                           {convertedPrice ? (
                             <div className="mt-2">
                               <p className="text-blue font-bold">
-                                Indicative unit price:{' '}
+                                {isSupplierTestTicket
+                                  ? 'Indicative selling price in selected currency:'
+                                  : 'Indicative unit price:'}{' '}
                                 {formatCurrency(
                                   convertedPrice.displayAmount,
                                   displayCurrency
@@ -531,7 +619,7 @@ export default function CartPage() {
 
                 <div className="flex justify-between gap-4">
                   <span className="muted">
-                    Indicative total
+                    Indicative cart total
                   </span>
 
                   <span className="font-bold text-navy text-right">
@@ -555,17 +643,20 @@ export default function CartPage() {
                   item.supplierEnvironment === 'test'
               ) && (
                 <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
-                  TEST DATA — NOT FOR SALE. Supplier net rates
-                  are not Grandstand Pass selling prices. Fees,
-                  taxes, margins and other charges are not included.
-                  No tickets have been reserved.
+                  TEST DATA — NOT FOR SALE. XS2Event test tickets
+                  use an indicative Grandstand Pass selling price
+                  with a €5 handling allowance per ticket and 15%
+                  markup. Applicable taxes, payment charges and
+                  other costs may not be included. No tickets have
+                  been reserved.
                 </p>
               )}
 
               {convertedTotal !== null && (
                 <p className="text-xs muted mt-4">
                   Indicative converted total only.
-                  Final ticket prices may differ.
+                  XS2Event test ticket prices include the €5 handling
+                  allowance and 15% markup. Final prices may differ.
                   {rateDates.length > 0 && (
                     <>
                       {' '}Exchange-rate date
