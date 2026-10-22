@@ -1,6 +1,7 @@
 
 import { xs2eventGet } from '../../lib/xs2event';
 import SupplierCurrencyPreview from '../../components/SupplierCurrencyPreview';
+import SupplierTestCartButton from '../../components/SupplierTestCartButton';
 import {
   getTicketDisplayPrice,
   type TicketDisplayPrice,
@@ -401,8 +402,10 @@ function TicketPricePreview({
 
 function TicketOffer({
   ticket,
+  event,
 }: {
   ticket: TicketWithPrices;
+  event: SupplierEvent;
 }) {
   return (
     <div
@@ -511,6 +514,43 @@ function TicketOffer({
       </div>
 
       <TicketPricePreview ticket={ticket} />
+
+      {ticket.ticket_id &&
+      event.event_id &&
+      typeof ticket.stock === 'number' &&
+      Number.isInteger(ticket.stock) &&
+      ticket.stock > 0 &&
+      typeof ticket.net_rate === 'number' &&
+      Number.isFinite(ticket.net_rate) &&
+      ticket.net_rate > 0 &&
+      (ticket.currency_code === 'EUR' ||
+        ticket.currency_code === 'GBP') ? (
+        <SupplierTestCartButton
+          ticketId={ticket.ticket_id}
+          eventId={event.event_id}
+          eventName={event.event_name || 'Unnamed football event'}
+          eventDate={formatEventDate(event.date_start)}
+          category={ticket.ticket_title || ticket.category_name || 'Unnamed ticket category'}
+          categoryId={ticket.category_id}
+          stock={ticket.stock}
+          minOrder={ticket.min_order ?? 1}
+          price={ticket.net_rate / 100}
+          currency={ticket.currency_code}
+          rawNetRate={ticket.net_rate}
+          rawFaceValue={
+            typeof ticket.face_value === 'number' &&
+            Number.isFinite(ticket.face_value) &&
+            ticket.face_value >= 0
+              ? ticket.face_value
+              : undefined
+          }
+        />
+      ) : (
+        <p style={{ margin: '14px 0 0', fontSize: '13px', color: '#92400e' }}>
+          Test cart unavailable for this offer: ticket identifier,
+          stock or supported supplier pricing is missing.
+        </p>
+      )}
 
       {ticket.options?.numbered_seat && (
         <p
@@ -947,6 +987,7 @@ export default async function SupplierPreviewPage() {
                                     ticketIndex
                                   }
                                   ticket={ticket}
+                                  event={event}
                                 />
                               )
                             )}
