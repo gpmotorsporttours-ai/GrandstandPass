@@ -1,10 +1,11 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Globe2, MapPin } from 'lucide-react';
 import { footballRegions, events } from '../../lib/data';
 import EventBrowser from '../../components/EventBrowser';
+import type { SupplierFootballEvent } from '../../components/EventBrowser';
 
 const countryCodes: Record<string, string> = {
   Spain: 'es',
@@ -53,6 +54,11 @@ const countryCodes: Record<string, string> = {
   'United Arab Emirates': 'ae',
 };
 
+type SupplierFootballResponse = {
+  supplierFootballEvents?: SupplierFootballEvent[];
+  testData?: boolean;
+};
+
 function WorldMapBackground() {
   return (
     <div
@@ -87,10 +93,77 @@ function WorldMapBackground() {
 export default function Football() {
   const [region, setRegion] = useState('All');
 
-  const count = (r: string) =>
-    events.filter(
-      (e) => e.sport === 'Football' && e.region === r
+  const [supplierFootballEvents, setSupplierFootballEvents] =
+    useState<SupplierFootballEvent[]>([]);
+
+  const [supplierLoading, setSupplierLoading] = useState(true);
+  const [supplierError, setSupplierError] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadSupplierEvents() {
+      try {
+        const response = await fetch(
+          '/api/football-test-events',
+          {
+            signal: controller.signal,
+            cache: 'no-store',
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Supplier feed unavailable');
+        }
+
+        const data: SupplierFootballResponse =
+          await response.json();
+
+        if (
+          data.testData !== true ||
+          !Array.isArray(data.supplierFootballEvents)
+        ) {
+          throw new Error('Unexpected supplier response');
+        }
+
+        if (!controller.signal.aborted) {
+          setSupplierFootballEvents(
+            data.supplierFootballEvents
+          );
+          setSupplierError(false);
+        }
+      } catch {
+        if (!controller.signal.aborted) {
+          setSupplierFootballEvents([]);
+          setSupplierError(true);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSupplierLoading(false);
+        }
+      }
+    }
+
+    loadSupplierEvents();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  const count = (selectedRegion: string) => {
+    const demoCount = events.filter(
+      event =>
+        event.sport === 'Football' &&
+        event.region === selectedRegion
     ).length;
+
+    const supplierCount = supplierFootballEvents.filter(
+      event => event.region === selectedRegion
+    ).length;
+
+    return demoCount + supplierCount;
+  };
 
   return (
     <>
@@ -105,8 +178,8 @@ export default function Football() {
           </h1>
 
           <p className="text-slate-300 max-w-xl mt-4">
-            Explore football by country and find your next
-            matchday experience.
+            Explore football by country and find your
+            next matchday experience.
           </p>
         </div>
       </section>
@@ -117,17 +190,17 @@ export default function Football() {
         </h2>
 
         <p className="muted mb-6">
-          Choose a destination to explore sample listings.
-          More countries and leagues will be populated by
-          the supplier integration.
+          Choose a destination to explore demonstration
+          listings and XS2Event test matches.
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {footballRegions.map((r) => {
+          {footballRegions.map(r => {
             const countryCode = countryCodes[r];
             const hasFlag = Boolean(countryCode);
             const isOtherLeagues = r === 'Other Leagues';
             const hasBackground = hasFlag || isOtherLeagues;
+            const listingCount = count(r);
 
             return (
               <button
@@ -135,6 +208,7 @@ export default function Football() {
                 type="button"
                 onClick={() => {
                   setRegion(r);
+
                   document
                     .getElementById('country-events')
                     ?.scrollIntoView({
@@ -142,9 +216,7 @@ export default function Football() {
                     });
                 }}
                 className={
-                  'relative isolate overflow-hidden rounded-xl border ' +
-                  'min-h-[170px] p-5 text-left transition-all ' +
-                  'hover:shadow-lg hover:-translate-y-0.5 ' +
+                  'relative isolate overflow-hidden rounded-xl border min-h-[170px] p-5 text-left transition-all hover:shadow-lg hover:-translate-y-0.5 ' +
                   (region === r
                     ? 'border-blue ring-2 ring-blue'
                     : 'border-slate-200')
@@ -155,9 +227,9 @@ export default function Football() {
                     <div
                       className="absolute inset-0 bg-cover bg-center"
                       style={{
-                        backgroundImage:
-                          `url("https://flagcdn.com/w640/${countryCode}.png")`,
-                        filter: 'saturate(0.72) brightness(0.85)',
+                        backgroundImage: `url("https://flagcdn.com/w640/${countryCode}.png")`,
+                        filter:
+                          'saturate(0.72) brightness(0.85)',
                       }}
                     />
 
@@ -211,9 +283,9 @@ export default function Football() {
                           : 'muted')
                       }
                     >
-                      {count(r)
-                        ? `${count(r)} sample event${
-                            count(r) > 1 ? 's' : ''
+                      {listingCount > 0
+                        ? `${listingCount} listing${
+                            listingCount === 1 ? '' : 's'
                           }`
                         : 'Listings coming with API'}
                     </div>
@@ -234,6 +306,7 @@ export default function Football() {
 
             {region !== 'All' && (
               <button
+                type="button"
                 onClick={() => setRegion('All')}
                 className="text-blue font-bold text-sm"
               >
@@ -242,10 +315,25 @@ export default function Football() {
             )}
           </div>
 
+          {supplierLoading && (
+            <p className="muted text-sm mt-4">
+              Loading XS2Event test football matches...
+            </p>
+          )}
+
+          {supplierError && (
+            <p className="text-sm text-amber-800 mt-4">
+              XS2Event test matches are temporarily
+              unavailable. Demonstration listings
+              remain accessible.
+            </p>
+          )}
+
           <EventBrowser
             key={region}
             initialSport="Football"
             initialRegion={region}
+            supplierFootballEvents={supplierFootballEvents}
           />
         </div>
       </div>
