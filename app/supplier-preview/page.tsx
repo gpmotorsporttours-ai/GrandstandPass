@@ -2,6 +2,7 @@
 import { xs2eventGet } from '../../lib/xs2event';
 import SupplierCurrencyPreview from '../../components/SupplierCurrencyPreview';
 import SupplierTestCartButton from '../../components/SupplierTestCartButton';
+import SupplierSellingPricePreview from '../../components/SupplierSellingPricePreview';
 import {
   getTicketDisplayPrice,
   type TicketDisplayPrice,
@@ -513,7 +514,15 @@ function TicketOffer({
         </p>
       </div>
 
-      <TicketPricePreview ticket={ticket} />
+      <TicketPricePreview ticket={ticket} />      {typeof ticket.net_rate === 'number' &&
+      Number.isSafeInteger(ticket.net_rate) &&
+      ticket.net_rate > 0 &&
+      isSupportedCurrency(ticket.currency_code) && (
+        <SupplierSellingPricePreview
+          netRateMinor={ticket.net_rate}
+          supplierCurrency={ticket.currency_code}
+        />
+      )}
 
       {ticket.ticket_id &&
       event.event_id &&
@@ -650,8 +659,10 @@ export default async function SupplierPreviewPage() {
           This page displays supplier test data
           for development purposes. Tickets
           cannot be purchased or reserved.
-          Prices are supplier amounts, not
-          customer-facing selling prices.
+          Supplier net rates and indicative
+          Grandstand Pass selling-price calculations
+          are shown separately. Neither is a confirmed
+          checkout price.
         </p>
       </div>
 
@@ -1019,13 +1030,15 @@ export default async function SupplierPreviewPage() {
             lineHeight: 1.7,
           }}
         >
-          We will confirm XS2Event commercial
-          pricing arrangements, including
-          supplier fees and taxes, before
-          setting customer selling prices.
-          We will also prepare safe test
-          shopping-cart functionality.
-          Checkout remains disabled.
+          Indicative selling-price calculations
+          use a €5 handling allowance per ticket
+          and a 15% markup across all events.
+          Supplier charges, applicable taxes,
+          and payment fees still require
+          confirmation before live sales.
+          The test cart continues to show
+          supplier net rates. Checkout remains
+          disabled.
         </p>
       </div>
     </main>
