@@ -14,10 +14,6 @@ import {
 
 import { useCart } from '../../components/CartProvider';
 import {
-  calculateSupplierTicketPrice,
-  type SupplierPricingBreakdown,
-} from '../../lib/supplierPricing';
-import {
   formatCurrency,
   isSupportedCurrency,
   type SupportedCurrency,
@@ -37,7 +33,6 @@ type ConvertedPrice = {
 type PricingState = {
   requestKey: string;
   prices: Record<string, ConvertedPrice>;
-  breakdowns: Record<string, SupplierPricingBreakdown>;
   loading: boolean;
   failed: boolean;
 };
@@ -118,7 +113,6 @@ export default function CartPage() {
       setPricingState({
         requestKey,
         prices: {},
-        breakdowns: {},
         loading: true,
         failed: false,
       });
@@ -129,6 +123,20 @@ export default function CartPage() {
           from: SupportedCurrency,
           to: SupportedCurrency
         ): Promise<ConvertedPrice> {
+          // No FX request is necessary for identical currencies.
+          if (from === to) {
+            return {
+              supplierAmount: amount,
+              supplierCurrency: from,
+              displayAmount: amount,
+              displayCurrency: to,
+              exchangeRate: 1,
+              rateDate: 'Not required',
+              converted: false,
+              indicative: true,
+            };
+          }
+
           const params = new URLSearchParams({
             amount: String(amount),
             from,
@@ -174,64 +182,44 @@ export default function CartPage() {
               item.supplier === 'XS2Event' &&
               item.supplierEnvironment === 'test';
 
-            let amount = item.price!;
-            let breakdown: SupplierPricingBreakdown | null = null;
-
+            // New test-cart entries already contain the selling price.
+            // Older entries saved the supplier net rate instead.
             if (supplierTest) {
               if (
                 !Number.isSafeInteger(item.supplierRawNetRate) ||
-                (item.supplierRawNetRate ?? 0) <= 0 ||
-                Math.abs(item.price! * 100 - item.supplierRawNetRate!) > 0.01
+                (item.supplierRawNetRate ?? 0) <= 0
               ) {
-                throw new Error('Invalid supplier net rate');
+                throw new Error('Missing supplier net rate');
               }
-
-              let eurToSupplierRate: number | undefined;
-              if (item.currency !== 'EUR') {
-                const allowanceConversion = await convertAmount(
-                  5,
-                  'EUR',
-                  supplierCurrency
-                );
-                eurToSupplierRate = allowanceConversion.displayAmount / 5;
+              if (
+                Math.abs(
+                  item.price! - item.supplierRawNetRate! / 100
+                ) < 0.005
+              ) {
+                throw new Error('Old supplier-net cart entry');
               }
-
-              breakdown = calculateSupplierTicketPrice({
-                netRateMinor: item.supplierRawNetRate!,
-                supplierCurrency,
-                eurToSupplierRate,
-              });
-              if (!breakdown) {
-                throw new Error('Supplier selling price unavailable');
-              }
-              amount = breakdown.indicativeSellingPrice;
             }
 
             const pricing = await convertAmount(
-              amount,
+              item.price!,
               supplierCurrency,
               displayCurrency
             );
-            return { id: item.id, pricing, breakdown };
+            return { id: item.id, pricing };
           })
         );
 
         if (cancelled) return;
 
         const prices: Record<string, ConvertedPrice> = {};
-        const breakdowns: Record<string, SupplierPricingBreakdown> = {};
 
         for (const result of results) {
           prices[result.id] = result.pricing;
-          if (result.breakdown) {
-            breakdowns[result.id] = result.breakdown;
-          }
         }
 
         setPricingState({
           requestKey,
           prices,
-          breakdowns,
           loading: false,
           failed: false,
         });
@@ -241,7 +229,6 @@ export default function CartPage() {
         setPricingState({
           requestKey,
           prices: {},
-          breakdowns: {},
           loading: false,
           failed: true,
         });
@@ -377,9 +364,6 @@ export default function CartPage() {
                   item.supplier === 'XS2Event' &&
                   item.supplierEnvironment === 'test';
 
-                const sellingBreakdown =
-                  currentPricing?.breakdowns[item.id];
-
                 const quantityLimit =
                   isSupplierTestTicket &&
                   typeof item.maxQuantity === 'number' &&
@@ -509,7 +493,7 @@ export default function CartPage() {
                         <>
                           <p>
                             {isSupplierTestTicket
-                              ? 'XS2Event test supplier net rate:'
+                              ? 'Grandstand Pass indicative selling price:'
                               : 'Original unit price:'}{' '}
                             {formatOriginalPrice(
                               item.price!,
@@ -517,31 +501,30 @@ export default function CartPage() {
                             )}
                           </p>
 
-                          {isSupplierTestTicket && sellingBreakdown && (
-                            <div className="mt-2 text-sm font-normal space-y-1">
-                              <p>
-                                Handling allowance:{' '}
+                          {isSupplierTestTicket &&
+                            typeof item.supplierRawNetRate === 'number' &&
+                            Number.isSafeInteger(item.supplierRawNetRate) &&
+                            item.supplierRawNetRate > 0 && (
+                              <p className="mt-1 text-xs font-normal muted">
+                                Original XS2Event supplier net rate:{' '}
                                 {formatOriginalPrice(
-                                  sellingBreakdown.handlingAllowance,
+                                  item.supplierRawNetRate / 100,
                                   item.currency!
                                 )}
                               </p>
-                              <p>
-                                15% markup:{' '}
-                                {formatOriginalPrice(
-                                  sellingBreakdown.markupAmount,
-                                  item.currency!
-                                )}
+                            )}
+
+                          {isSupplierTestTicket &&
+                            typeof item.supplierRawNetRate === 'number' &&
+                            Math.abs(
+                              item.price! - item.supplierRawNetRate / 100
+                            ) < 0.005 && (
+                              <p className="mt-2 text-xs text-red-600">
+                                This ticket was saved at the old supplier net
+                                price. Remove it and add it again to use the
+                                Grandstand Pass selling price.
                               </p>
-                              <p className="font-bold text-navy">
-                                Indicative Grandstand Pass unit price:{' '}
-                                {formatOriginalPrice(
-                                  sellingBreakdown.indicativeSellingPrice,
-                                  item.currency!
-                                )}
-                              </p>
-                            </div>
-                          )}
+                            )}
 
                           {convertedPrice ? (
                             <div className="mt-2">
@@ -660,14 +643,14 @@ export default function CartPage() {
 
               {convertedTotal !== null && (
                 <p className="text-xs muted mt-4">
-                  Indicative converted total only.
+                  Indicative cart total only.
                   XS2Event test ticket prices include the €5 handling
                   allowance and 15% markup. Final prices may differ.
-                  {rateDates.length > 0 && (
+                  {rateDates.some((date) => date !== 'Not required') && (
                     <>
                       {' '}Exchange-rate date
                       {rateDates.length > 1 ? 's' : ''}:{' '}
-                      {rateDates.join(', ')}.
+                      {rateDates.filter((date) => date !== 'Not required').join(', ')}.
                     </>
                   )}
                 </p>
@@ -684,9 +667,10 @@ export default function CartPage() {
 
               {currentPricing?.failed && (
                 <p className="text-xs text-red-600 mt-4">
-                  Currency conversion is temporarily
-                  unavailable. Original ticket prices
-                  have been preserved.
+                  Pricing is unavailable. If this is an older
+                  XS2Event test ticket, remove it and add it again.
+                  Otherwise, currency conversion may be temporarily
+                  unavailable. Original stored prices have been preserved.
                 </p>
               )}
 
