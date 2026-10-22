@@ -503,19 +503,6 @@ export default function CartPage() {
 
                           {isSupplierTestTicket &&
                             typeof item.supplierRawNetRate === 'number' &&
-                            Number.isSafeInteger(item.supplierRawNetRate) &&
-                            item.supplierRawNetRate > 0 && (
-                              <p className="mt-1 text-xs font-normal muted">
-                                Original XS2Event supplier net rate:{' '}
-                                {formatOriginalPrice(
-                                  item.supplierRawNetRate / 100,
-                                  item.currency!
-                                )}
-                              </p>
-                            )}
-
-                          {isSupplierTestTicket &&
-                            typeof item.supplierRawNetRate === 'number' &&
                             Math.abs(
                               item.price! - item.supplierRawNetRate / 100
                             ) < 0.005 && (
