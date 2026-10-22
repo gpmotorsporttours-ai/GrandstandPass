@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -25,6 +26,23 @@ const sportOptions = [
 ];
 
 type ListedEvent = (typeof events)[number];
+
+/**
+ * A separate, development-only supplier listing.
+ *
+ * These listings are NOT added to lib/data.ts.
+ * They are NOT passed to EventCard, because EventCard
+ * expects a normal demonstration event.
+ */
+export type SupplierFootballEvent = {
+  id: string;
+  name: string;
+  date: string;
+  location: string;
+  region: string;
+  competition?: string;
+  supplierEventId?: string;
+};
 
 const rugbyCompetitions = [
   {
@@ -80,12 +98,29 @@ const golfCompetitions = [
   },
 ];
 
+function formatSupplierDate(date: string) {
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export default function EventBrowser({
   initialSport = 'All',
   initialRegion = 'All',
+  supplierFootballEvents = [],
 }: {
   initialSport?: string;
   initialRegion?: string;
+  supplierFootballEvents?: SupplierFootballEvent[];
 }) {
   const [query, setQuery] = useState('');
   const [sport, setSport] = useState(initialSport);
@@ -94,14 +129,30 @@ export default function EventBrowser({
 
   const matchesSport = (event: ListedEvent) => {
     if (sport === 'All') return true;
+
     if (otherSports.includes(sport)) {
-      return event.sport === 'Other Events' && event.region === sport;
+      return (
+        event.sport === 'Other Events' &&
+        event.region === sport
+      );
     }
+
     return event.sport === sport;
   };
 
+  const showSupplierFootball =
+    sport === 'Football' || sport === 'All';
+
   const regions = [
-    ...new Set(events.filter(matchesSport).map(event => event.region)),
+    ...new Set([
+      ...events
+        .filter(matchesSport)
+        .map(event => event.region),
+
+      ...(showSupplierFootball
+        ? supplierFootballEvents.map(event => event.region)
+        : []),
+    ]),
   ].sort();
 
   const filtered = useMemo(() => {
@@ -110,9 +161,13 @@ export default function EventBrowser({
         const sportMatches =
           sport === 'All' ||
           (otherSports.includes(sport)
-            ? event.sport === 'Other Events' && event.region === sport
+            ? event.sport === 'Other Events' &&
+              event.region === sport
             : event.sport === sport);
-        const regionMatches = region === 'All' || event.region === region;
+
+        const regionMatches =
+          region === 'All' || event.region === region;
+
         const searchMatches = [
           event.name,
           event.location,
@@ -123,7 +178,12 @@ export default function EventBrowser({
           .join(' ')
           .toLowerCase()
           .includes(query.toLowerCase());
-        return sportMatches && regionMatches && searchMatches;
+
+        return (
+          sportMatches &&
+          regionMatches &&
+          searchMatches
+        );
       })
       .sort((a, b) =>
         sort === 'price'
@@ -131,6 +191,41 @@ export default function EventBrowser({
           : a.date.localeCompare(b.date)
       );
   }, [query, sport, region, sort]);
+
+  const filteredSupplierEvents = useMemo(() => {
+    if (!showSupplierFootball) {
+      return [];
+    }
+
+    const search = query.trim().toLowerCase();
+
+    return supplierFootballEvents
+      .filter(event => {
+        const regionMatches =
+          region === 'All' || event.region === region;
+
+        const searchMatches = [
+          event.name,
+          event.location,
+          event.region,
+          event.competition || '',
+          'Football',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(search);
+
+        return regionMatches && searchMatches;
+      })
+      .sort((a, b) =>
+        a.date.localeCompare(b.date)
+      );
+  }, [
+    supplierFootballEvents,
+    showSupplierFootball,
+    region,
+    query,
+  ]);
 
   const competitions =
     sport === 'Rugby'
@@ -141,33 +236,55 @@ export default function EventBrowser({
           ? golfCompetitions
           : null;
 
-  const groupedEvents = competitions?.map(competition => ({
-    title: competition.title,
-    items: filtered.filter(competition.matches),
-  }));
+  const groupedEvents = competitions?.map(
+    competition => ({
+      title: competition.title,
+      items: filtered.filter(competition.matches),
+    })
+  );
 
   const ungroupedEvents = competitions
     ? filtered.filter(
-        event => !competitions.some(competition => competition.matches(event))
+        event =>
+          !competitions.some(competition =>
+            competition.matches(event)
+          )
       )
     : [];
+
+  const totalEvents =
+    filtered.length + filteredSupplierEvents.length;
 
   return (
     <section id="events" className="py-14">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-7">
         <div>
-          <div className="eyebrow mb-2">Explore the action</div>
-          <h2 className="section-title">Find your next event</h2>
+          <div className="eyebrow mb-2">
+            Explore the action
+          </div>
+
+          <h2 className="section-title">
+            Find your next event
+          </h2>
+
           <p className="muted mt-2">
-            Browse event listings while we prepare the live catalogue.
+            Browse event listings while we prepare
+            the live catalogue.
           </p>
         </div>
-        <span className="text-sm muted">{filtered.length} events</span>
+
+        <span className="text-sm muted">
+          {totalEvents} events
+        </span>
       </div>
 
       <div className="bg-ice p-4 rounded-xl grid md:grid-cols-4 gap-3 mb-7">
         <label className="md:col-span-1 relative">
-          <Search size={17} className="absolute left-3 top-3.5 text-slate-400" />
+          <Search
+            size={17}
+            className="absolute left-3 top-3.5 text-slate-400"
+          />
+
           <input
             className="field pl-10"
             placeholder="Search events or cities"
@@ -175,6 +292,7 @@ export default function EventBrowser({
             onChange={e => setQuery(e.target.value)}
           />
         </label>
+
         <select
           className="field"
           value={sport}
@@ -185,10 +303,14 @@ export default function EventBrowser({
           aria-label="Sport"
         >
           <option value="All">All</option>
+
           {sportOptions.map(option => (
-            <option key={option} value={option}>{option}</option>
+            <option key={option} value={option}>
+              {option}
+            </option>
           ))}
         </select>
+
         <select
           className="field"
           value={region}
@@ -196,10 +318,14 @@ export default function EventBrowser({
           aria-label="Region"
         >
           <option value="All">All</option>
+
           {regions.map(option => (
-            <option key={option} value={option}>{option}</option>
+            <option key={option} value={option}>
+              {option}
+            </option>
           ))}
         </select>
+
         <select
           className="field"
           value={sort}
@@ -207,62 +333,154 @@ export default function EventBrowser({
           aria-label="Sort events"
         >
           <option value="date">Soonest first</option>
+
           {sport !== 'Formula 1' && (
-            <option value="price">Lowest demo price</option>
+            <option value="price">
+              Lowest demo price
+            </option>
           )}
         </select>
       </div>
 
-      {filtered.length ? (
-        competitions ? (
-          <div className="space-y-14">
-            {groupedEvents?.map(group =>
-              group.items.length > 0 ? (
-                <div key={group.title}>
-                  <div className="mb-6 border-b border-slate-200 pb-4">
-                    <h2 className="text-2xl md:text-3xl font-black text-navy">
-                      {group.title}
-                    </h2>
-                    <p className="muted mt-2">
-                      {group.items.length}{' '}
-                      {group.items.length === 1 ? 'event' : 'events'}
-                    </p>
-                  </div>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {group.items.map(event => (
-                      <EventCard key={event.slug} event={event} />
-                    ))}
-                  </div>
-                </div>
-              ) : null
-            )}
-            {ungroupedEvents.length > 0 && (
-              <div>
-                <div className="mb-6 border-b border-slate-200 pb-4">
-                  <h2 className="text-2xl md:text-3xl font-black text-navy">
-                    Other {sport} Events
-                  </h2>
-                </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {ungroupedEvents.map(event => (
-                    <EventCard key={event.slug} event={event} />
-                  ))}
-                </div>
+      {totalEvents > 0 ? (
+        <div className="space-y-12">
+          {filteredSupplierEvents.length > 0 && (
+            <div>
+              <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-5">
+                <h3 className="text-xl font-extrabold text-amber-950">
+                  XS2Event test football matches
+                </h3>
+
+                <p className="mt-2 text-sm text-amber-950">
+                  TEST DATA — NOT FOR SALE.
+                  These are development-only supplier
+                  listings. Availability is not reserved
+                  and checkout is disabled.
+                </p>
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map(event => (
-              <EventCard key={event.slug} event={event} />
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredSupplierEvents.map(event => (
+                  <article
+                    key={event.id}
+                    className="rounded-xl border border-amber-200 bg-white p-5 shadow-sm"
+                  >
+                    <div className="mb-3 text-xs font-extrabold uppercase tracking-wider text-amber-800">
+                      Football · XS2Event TEST
+                    </div>
+
+                    <h3 className="text-lg font-extrabold text-navy">
+                      {event.name}
+                    </h3>
+
+                    <p className="mt-3 text-sm muted">
+                      {formatSupplierDate(event.date)}
+                    </p>
+
+                    <p className="mt-2 text-sm muted">
+                      {event.location}
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-navy">
+                      {event.region}
+                    </p>
+
+                    {event.competition && (
+                      <p className="mt-2 text-sm muted">
+                        {event.competition}
+                      </p>
+                    )}
+
+                    <div className="mt-5 border-t pt-4">
+                      <p className="text-sm font-bold text-amber-900">
+                        Test listing — not for sale
+                      </p>
+
+                      <p className="mt-1 text-xs muted">
+                        Ticket availability and indicative
+                        prices are shown separately in
+                        the supplier preview.
+                      </p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {filtered.length > 0 &&
+            (competitions ? (
+              <div className="space-y-14">
+                {groupedEvents?.map(group =>
+                  group.items.length > 0 ? (
+                    <div key={group.title}>
+                      <div className="mb-6 border-b border-slate-200 pb-4">
+                        <h2 className="text-2xl md:text-3xl font-black text-navy">
+                          {group.title}
+                        </h2>
+
+                        <p className="muted mt-2">
+                          {group.items.length}{' '}
+                          {group.items.length === 1
+                            ? 'event'
+                            : 'events'}
+                        </p>
+                      </div>
+
+                      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {group.items.map(event => (
+                          <EventCard
+                            key={event.slug}
+                            event={event}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                )}
+
+                {ungroupedEvents.length > 0 && (
+                  <div>
+                    <div className="mb-6 border-b border-slate-200 pb-4">
+                      <h2 className="text-2xl md:text-3xl font-black text-navy">
+                        Other {sport} Events
+                      </h2>
+                    </div>
+
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {ungroupedEvents.map(event => (
+                        <EventCard
+                          key={event.slug}
+                          event={event}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filtered.map(event => (
+                  <EventCard
+                    key={event.slug}
+                    event={event}
+                  />
+                ))}
+              </div>
             ))}
-          </div>
-        )
+        </div>
       ) : (
         <div className="text-center py-16 border rounded-xl">
           <SlidersHorizontal className="mx-auto mb-3 text-blue" />
-          <h3 className="font-bold">No events match your filters</h3>
-          <p className="muted text-sm mt-2">Try a different search or category.</p>
+
+          <h3 className="font-bold">
+            No events match your filters
+          </h3>
+
+          <p className="muted text-sm mt-2">
+            Try a different search or category.
+          </p>
+
           <button
             className="btn-outline mt-5"
             onClick={() => {
