@@ -24,16 +24,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Use today's UTC date to exclude events that have
-    // already ended. The supplier's date_stop filter
-    // is documented as greater than or equal to this date.
     const today = new Date().toISOString().slice(0, 10);
 
     const params = new URLSearchParams({
       sport_type: 'soccer',
       date_stop: today,
-      page_size: '10',
-      page_number: '1',
     });
 
     const response = await xs2eventGet<unknown>(
