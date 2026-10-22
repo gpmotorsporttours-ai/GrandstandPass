@@ -401,6 +401,17 @@ export default function EventBrowser({
                         prices are shown separately in
                         the supplier preview.
                       </p>
+
+                      <a
+                        href={
+                          event.supplierEventId
+                            ? `/supplier-preview?eventId=${encodeURIComponent(event.supplierEventId)}`
+                            : '/supplier-preview'
+                        }
+                        className="mt-4 inline-flex items-center justify-center rounded-lg bg-navy px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-blue"
+                      >
+                        View test tickets →
+                      </a>
                     </div>
                   </article>
                 ))}
