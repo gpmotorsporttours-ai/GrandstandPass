@@ -310,6 +310,21 @@ export default function CartPage() {
                     ? currentPricing.prices[item.id]
                     : undefined;
 
+                const isSupplierTestTicket =
+                  item.supplier === 'XS2Event' &&
+                  item.supplierEnvironment === 'test';
+
+                const quantityLimit =
+                  isSupplierTestTicket &&
+                  typeof item.maxQuantity === 'number' &&
+                  Number.isInteger(item.maxQuantity) &&
+                  item.maxQuantity >= 1
+                    ? Math.min(10, item.maxQuantity)
+                    : 10;
+
+                const atQuantityLimit =
+                  item.quantity >= quantityLimit;
+
                 return (
                   <div
                     key={item.id}
@@ -331,6 +346,12 @@ export default function CartPage() {
                         <h2 className="text-xl font-black text-navy mt-1">
                           {item.eventName}
                         </h2>
+
+                        {isSupplierTestTicket && (
+                          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+                            XS2Event TEST DATA — NOT FOR SALE
+                          </div>
+                        )}
 
                         {item.eventDate && (
                           <p className="muted text-sm mt-2">
@@ -383,7 +404,7 @@ export default function CartPage() {
                               item.quantity + 1
                             )
                           }
-                          disabled={item.quantity >= 10}
+                          disabled={atQuantityLimit}
                           aria-label={`Increase quantity for ${item.eventName}`}
                           className="w-10 h-10 rounded-lg border flex items-center justify-center disabled:opacity-40"
                         >
@@ -403,11 +424,27 @@ export default function CartPage() {
                       </button>
                     </div>
 
+                    {isSupplierTestTicket && (
+                      <div className="mt-3 text-xs text-amber-900">
+                        <p>
+                          Maximum test quantity: {quantityLimit}.
+                          {atQuantityLimit
+                            ? ' Maximum reached — the + button is disabled.'
+                            : ' This is based on the last reported supplier stock.'}
+                        </p>
+                        <p className="mt-1">
+                          Supplier stock is not reserved and may change.
+                        </p>
+                      </div>
+                    )}
+
                     <div className="mt-4 text-sm font-semibold text-navy">
                       {hasPrice ? (
                         <>
                           <p>
-                            Original unit price:{' '}
+                            {isSupplierTestTicket
+                              ? 'XS2Event test supplier net rate:'
+                              : 'Original unit price:'}{' '}
                             {formatOriginalPrice(
                               item.price!,
                               item.currency!
@@ -511,6 +548,19 @@ export default function CartPage() {
                   </span>
                 </div>
               </div>
+
+              {items.some(
+                (item) =>
+                  item.supplier === 'XS2Event' &&
+                  item.supplierEnvironment === 'test'
+              ) && (
+                <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                  TEST DATA — NOT FOR SALE. Supplier net rates
+                  are not Grandstand Pass selling prices. Fees,
+                  taxes, margins and other charges are not included.
+                  No tickets have been reserved.
+                </p>
+              )}
 
               {convertedTotal !== null && (
                 <p className="text-xs muted mt-4">
