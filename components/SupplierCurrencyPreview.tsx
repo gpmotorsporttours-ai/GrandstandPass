@@ -47,9 +47,22 @@ export default function SupplierCurrencyPreview() {
           lineHeight: 1.6,
         }}
       >
-        This currency is selected using the
-        dropdown in the Grandstand Pass header.
-        You can change it at any time.
+        Grandstand Pass supports five display
+        currencies: ZAR, EUR, USD, GBP and AED.
+        Your preferred currency can be changed
+        using the dropdown in the website header.
+      </p>
+
+      <p
+        style={{
+          margin: '0 0 10px',
+          lineHeight: 1.6,
+        }}
+      >
+        The supplier ticket offers below show
+        indicative currency equivalents in all
+        five supported currencies, using our
+        connected exchange-rate service.
       </p>
 
       <p
@@ -60,11 +73,13 @@ export default function SupplierCurrencyPreview() {
         }}
       >
         <strong>Development notice:</strong>{' '}
-        XS2Event ticket amounts are currently
-        displayed in their original supplier
-        currency. Conversion will be enabled
-        once the supplier confirms how its
-        monetary values are represented.
+        These conversions are based on XS2Event
+        test supplier net rates. They are not
+        final customer selling prices. Supplier
+        fees, applicable taxes and Grandstand
+        Pass margins have not yet been applied.
+        Ticket reservations and checkout remain
+        disabled.
       </p>
     </section>
   );
