@@ -1,5 +1,6 @@
 
 import { xs2eventGet } from '../../lib/xs2event';
+import SupplierCurrencyPreview from '../../components/SupplierCurrencyPreview';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -90,7 +91,10 @@ function formatRawPrice(
   amount: number | null | undefined,
   currency?: string
 ) {
-  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount)
+  ) {
     return 'Not provided';
   }
 
@@ -137,7 +141,8 @@ async function getEventTickets(
     return {
       event,
       tickets,
-      ticketCount: response.pagination?.total_size ?? tickets.length,
+      ticketCount:
+        response.pagination?.total_size ?? tickets.length,
       ticketError: false,
     };
   } catch (error) {
@@ -283,6 +288,8 @@ export default async function SupplierPreviewPage() {
         <strong>Events found:</strong> {totalEvents}
       </div>
 
+      <SupplierCurrencyPreview />
+
       {errorMessage && (
         <div
           role="alert"
@@ -326,7 +333,15 @@ export default async function SupplierPreviewPage() {
         }}
       >
         {eventsWithTickets.map(
-          ({ event, tickets, ticketCount, ticketError }, index) => (
+          (
+            {
+              event,
+              tickets,
+              ticketCount,
+              ticketError,
+            },
+            index
+          ) => (
             <article
               key={event.event_id ?? index}
               style={{
