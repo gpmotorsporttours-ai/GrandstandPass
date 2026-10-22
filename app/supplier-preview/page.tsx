@@ -87,6 +87,20 @@ type EventWithTickets = {
   ticketError: boolean;
 };
 
+const cardStyle = {
+  border: '1px solid #e5e7eb',
+  borderRadius: '16px',
+  overflow: 'hidden',
+  background: '#fff',
+  color: '#111827',
+  boxShadow: '0 6px 24px rgba(0,0,0,0.05)',
+} as const;
+
+const rowStyle = {
+  margin: '0 0 10px',
+  lineHeight: 1.6,
+} as const;
+
 function formatEventDate(value?: string) {
   if (!value) return 'Date to be confirmed';
 
@@ -106,20 +120,57 @@ function formatEventDate(value?: string) {
   }).format(date);
 }
 
-function formatRawPrice(
+// Only EUR and GBP supplier test price units are
+// currently supported by this preview.
+//
+// Keep the original API integer unchanged.
+// Divide by 100 only when displaying money or
+// calculating indicative currency equivalents.
+function getMajorUnitAmount(
+  amount: number | null | undefined,
+  currency?: string
+): number | null {
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount < 0
+  ) {
+    return null;
+  }
+
+  if (currency !== 'EUR' && currency !== 'GBP') {
+    return null;
+  }
+
+  return amount / 100;
+}
+
+function formatSupplierAmount(
   amount: number | null | undefined,
   currency?: string
 ) {
+  const majorAmount = getMajorUnitAmount(
+    amount,
+    currency
+  );
+
   if (
-    typeof amount !== 'number' ||
-    !Number.isFinite(amount)
+    majorAmount !== null &&
+    isSupportedCurrency(currency)
   ) {
-    return 'Not provided';
+    return formatCurrency(majorAmount, currency);
   }
 
-  return `${amount.toLocaleString('en-GB')} ${
-    currency || 'currency unspecified'
-  } (raw supplier value)`;
+  if (
+    typeof amount === 'number' &&
+    Number.isFinite(amount)
+  ) {
+    return `Unverified amount: ${amount.toLocaleString(
+      'en-GB'
+    )} ${currency ?? ''}`;
+  }
+
+  return 'Price unavailable';
 }
 
 async function addPreviewPrices(
@@ -127,27 +178,15 @@ async function addPreviewPrices(
 ): Promise<TicketWithPrices> {
   const sourceCurrency = ticket.currency_code;
 
-  const validSource =
-    isSupportedCurrency(sourceCurrency);
+  const amount = getMajorUnitAmount(
+    ticket.net_rate,
+    sourceCurrency
+  );
 
-  const validAmount =
-    typeof ticket.net_rate === 'number' &&
-    Number.isFinite(ticket.net_rate) &&
-    ticket.net_rate > 0;
-
-  if (!validSource || !validAmount) {
-    return {
-      ...ticket,
-      previewPrices: [],
-    };
-  }
-
-  // XS2Event sandbox EUR/GBP rates are in minor units.
-  // This conversion is deliberately limited to EUR/GBP
-  // until other supplier currency conventions are verified.
   if (
-    sourceCurrency !== 'EUR' &&
-    sourceCurrency !== 'GBP'
+    amount === null ||
+    amount <= 0 ||
+    !isSupportedCurrency(sourceCurrency)
   ) {
     return {
       ...ticket,
@@ -155,14 +194,12 @@ async function addPreviewPrices(
     };
   }
 
-  const majorUnitAmount = ticket.net_rate! / 100;
-
   const previewPrices = await Promise.all(
     SUPPORTED_CURRENCIES.map(async (currency) => {
       try {
         const result = await getTicketDisplayPrice(
           {
-            amount: majorUnitAmount,
+            amount,
             currency: sourceCurrency,
           },
           currency
@@ -278,7 +315,7 @@ function TicketPricePreview({
     >
       <h5
         style={{
-          fontSize: '15px',
+          fontSize: '16px',
           fontWeight: 800,
           margin: '0 0 8px',
         }}
@@ -288,26 +325,20 @@ function TicketPricePreview({
 
       <p
         style={{
-          fontSize: '12px',
+          fontSize: '13px',
           lineHeight: 1.6,
-          margin: '0 0 12px',
+          margin: '0 0 14px',
         }}
       >
-        Development-only conversion of the
-        supplier net rate. These are not
-        customer selling prices.
+        Currency equivalents of the XS2Event
+        supplier net rate. These are development
+        figures, not customer selling prices.
       </p>
 
       {ticket.previewPrices.length === 0 ? (
-        <p
-          style={{
-            margin: 0,
-            fontSize: '13px',
-          }}
-        >
-          Conversion unavailable. The supplier
-          amount or currency has not yet been
-          verified for this preview.
+        <p style={{ fontSize: '13px', margin: 0 }}>
+          Currency conversion is unavailable
+          for this supplier amount or currency.
         </p>
       ) : (
         <div
@@ -353,17 +384,159 @@ function TicketPricePreview({
 
       <p
         style={{
-          fontSize: '11px',
+          fontSize: '12px',
           lineHeight: 1.6,
           margin: '12px 0 0',
         }}
       >
-        Exchange rates are indicative and may
-        change. Supplier fees, taxes, payment
-        charges and Grandstand Pass margins
-        are not included. No reservations or
-        purchases are available.
+        Indicative exchange rates may change.
+        Supplier fees, taxes, payment charges
+        and Grandstand Pass margins are not
+        included. Test tickets cannot be
+        reserved or purchased.
       </p>
+    </div>
+  );
+}
+
+function TicketOffer({
+  ticket,
+}: {
+  ticket: TicketWithPrices;
+}) {
+  return (
+    <div
+      style={{
+        border: '1px solid #dbe3ef',
+        borderRadius: '12px',
+        padding: '16px',
+        background: '#f8fafc',
+      }}
+    >
+      <h4
+        style={{
+          fontSize: '18px',
+          fontWeight: 800,
+          margin: '0 0 14px',
+          lineHeight: 1.4,
+        }}
+      >
+        {ticket.ticket_title ||
+          ticket.category_name ||
+          'Unnamed ticket category'}
+      </h4>
+
+      <p style={rowStyle}>
+        <strong>Category:</strong>{' '}
+        {ticket.category_type || 'Unknown'}
+      </p>
+
+      <p style={rowStyle}>
+        <strong>Ticket type:</strong>{' '}
+        {ticket.type_ticket || 'Unknown'}
+      </p>
+
+      <p style={rowStyle}>
+        <strong>Validity:</strong>{' '}
+        {ticket.ticket_validity || 'Unknown'}
+      </p>
+
+      <p style={rowStyle}>
+        <strong>Status:</strong>{' '}
+        {ticket.ticket_status || 'Unknown'}
+      </p>
+
+      <p style={rowStyle}>
+        <strong>Reported stock:</strong>{' '}
+        {ticket.stock ?? 'Unknown'}
+      </p>
+
+      <p style={rowStyle}>
+        <strong>Minimum order:</strong>{' '}
+        {ticket.min_order ?? 'Unknown'}
+      </p>
+
+      <div
+        style={{
+          borderTop: '1px solid #dbe3ef',
+          paddingTop: '16px',
+          marginTop: '14px',
+        }}
+      >
+        <p
+          style={{
+            fontSize: '13px',
+            color: '#6b7280',
+            margin: '0 0 6px',
+          }}
+        >
+          XS2Event supplier net rate
+        </p>
+
+        <p
+          style={{
+            fontSize: '25px',
+            fontWeight: 800,
+            margin: '0 0 14px',
+          }}
+        >
+          {formatSupplierAmount(
+            ticket.net_rate,
+            ticket.currency_code
+          )}
+        </p>
+
+        <p style={rowStyle}>
+          <strong>Face value:</strong>{' '}
+          {formatSupplierAmount(
+            ticket.face_value,
+            ticket.currency_code
+          )}
+        </p>
+
+        <p
+          style={{
+            fontSize: '12px',
+            lineHeight: 1.6,
+            color: '#6b7280',
+            margin: '8px 0 0',
+          }}
+        >
+          Supplier test prices are displayed
+          in normal currency units. Original
+          API values remain unchanged in the
+          retrieved data. These are not final
+          Grandstand Pass selling prices.
+        </p>
+      </div>
+
+      <TicketPricePreview ticket={ticket} />
+
+      {ticket.options?.numbered_seat && (
+        <p
+          style={{
+            margin: '14px 0 0',
+            fontSize: '13px',
+          }}
+        >
+          Numbered seating reported
+        </p>
+      )}
+
+      <div
+        style={{
+          marginTop: '14px',
+          padding: '10px',
+          borderRadius: '8px',
+          background: '#fff3cd',
+          color: '#5c4500',
+          fontSize: '12px',
+          fontWeight: 700,
+          textAlign: 'center',
+        }}
+      >
+        TEST DATA — NOT FOR SALE
+      </div>
     </div>
   );
 }
@@ -437,8 +610,8 @@ export default async function SupplierPreviewPage() {
           This page displays supplier test data
           for development purposes. Tickets
           cannot be purchased or reserved.
-          Prices are not customer-facing
-          selling prices.
+          Prices are supplier amounts, not
+          customer-facing selling prices.
         </p>
       </div>
 
@@ -568,16 +741,7 @@ export default async function SupplierPreviewPage() {
           ) => (
             <article
               key={event.event_id ?? index}
-              style={{
-                border:
-                  '1px solid #e5e7eb',
-                borderRadius: '16px',
-                overflow: 'hidden',
-                background: '#fff',
-                color: '#111827',
-                boxShadow:
-                  '0 6px 24px rgba(0,0,0,0.05)',
-              }}
+              style={cardStyle}
             >
               <div
                 style={{
@@ -614,37 +778,21 @@ export default async function SupplierPreviewPage() {
                 </h2>
               </div>
 
-              <div
-                style={{
-                  padding: '24px',
-                }}
-              >
-                <p
-                  style={{
-                    margin: '0 0 12px',
-                  }}
-                >
+              <div style={{ padding: '24px' }}>
+                <p style={rowStyle}>
                   <strong>Date:</strong>{' '}
                   {formatEventDate(
                     event.date_start
                   )}
                 </p>
 
-                <p
-                  style={{
-                    margin: '0 0 12px',
-                  }}
-                >
+                <p style={rowStyle}>
                   <strong>Venue:</strong>{' '}
                   {event.venue_name ??
                     'Venue to be confirmed'}
                 </p>
 
-                <p
-                  style={{
-                    margin: '0 0 12px',
-                  }}
-                >
+                <p style={rowStyle}>
                   <strong>Location:</strong>{' '}
                   {[
                     event.city,
@@ -657,12 +805,11 @@ export default async function SupplierPreviewPage() {
 
                 <p
                   style={{
-                    margin: '0 0 20px',
+                    ...rowStyle,
+                    marginBottom: '20px',
                   }}
                 >
-                  <strong>
-                    Event status:
-                  </strong>{' '}
+                  <strong>Event status:</strong>{' '}
                   {event.event_status ??
                     'Unknown'}
                 </p>
@@ -676,39 +823,39 @@ export default async function SupplierPreviewPage() {
                 >
                   <p
                     style={{
-                      fontSize: '12px',
+                      fontSize: '13px',
                       color: '#6b7280',
-                      marginBottom: '6px',
+                      margin: '0 0 6px',
                     }}
                   >
-                    Supplier-reported
-                    minimum price
+                    Supplier-reported minimum price
                   </p>
 
                   <p
                     style={{
-                      fontSize: '22px',
+                      fontSize: '24px',
                       fontWeight: 800,
                       margin: '0 0 10px',
                     }}
                   >
-                    {typeof event.min_ticket_price_eur ===
-                    'number'
-                      ? `${event.min_ticket_price_eur} EUR (raw supplier value)`
-                      : 'Price unavailable'}
+                    {formatSupplierAmount(
+                      event.min_ticket_price_eur,
+                      'EUR'
+                    )}
                   </p>
 
                   <p
                     style={{
                       fontSize: '13px',
                       color: '#6b7280',
-                      margin: '0 0 12px',
+                      lineHeight: 1.6,
+                      margin: '0 0 14px',
                     }}
                   >
-                    Event-level price remains
-                    unconverted. Only verified
-                    EUR/GBP ticket-level net
-                    rates are converted below.
+                    Event-level minimum price
+                    reported by XS2Event.
+                    This is not a customer
+                    selling price.
                   </p>
 
                   <p
@@ -794,221 +941,13 @@ export default async function SupplierPreviewPage() {
                                 ticket,
                                 ticketIndex
                               ) => (
-                                <div
+                                <TicketOffer
                                   key={
                                     ticket.ticket_id ??
                                     ticketIndex
                                   }
-                                  style={{
-                                    border:
-                                      '1px solid #dbe3ef',
-                                    borderRadius:
-                                      '12px',
-                                    padding: '16px',
-                                    background:
-                                      '#f8fafc',
-                                  }}
-                                >
-                                  <h4
-                                    style={{
-                                      fontSize:
-                                        '16px',
-                                      fontWeight:
-                                        800,
-                                      margin:
-                                        '0 0 12px',
-                                      lineHeight:
-                                        1.4,
-                                    }}
-                                  >
-                                    {ticket.ticket_title ||
-                                      ticket.category_name ||
-                                      'Unnamed ticket category'}
-                                  </h4>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Category:
-                                    </strong>{' '}
-                                    {ticket.category_type ||
-                                      'Unknown'}
-                                  </p>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Ticket type:
-                                    </strong>{' '}
-                                    {ticket.type_ticket ||
-                                      'Unknown'}
-                                  </p>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Validity:
-                                    </strong>{' '}
-                                    {ticket.ticket_validity ||
-                                      'Unknown'}
-                                  </p>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Status:
-                                    </strong>{' '}
-                                    {ticket.ticket_status ||
-                                      'Unknown'}
-                                  </p>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Reported stock:
-                                    </strong>{' '}
-                                    {ticket.stock ??
-                                      'Unknown'}
-                                  </p>
-
-                                  <p
-                                    style={{
-                                      margin:
-                                        '0 0 8px',
-                                    }}
-                                  >
-                                    <strong>
-                                      Minimum order:
-                                    </strong>{' '}
-                                    {ticket.min_order ??
-                                      'Unknown'}
-                                  </p>
-
-                                  <div
-                                    style={{
-                                      borderTop:
-                                        '1px solid #dbe3ef',
-                                      paddingTop:
-                                        '12px',
-                                      marginTop:
-                                        '12px',
-                                    }}
-                                  >
-                                    <p
-                                      style={{
-                                        margin:
-                                          '0 0 8px',
-                                      }}
-                                    >
-                                      <strong>
-                                        Net rate:
-                                      </strong>{' '}
-                                      {formatRawPrice(
-                                        ticket.net_rate,
-                                        ticket.currency_code
-                                      )}
-                                    </p>
-
-                                    <p
-                                      style={{
-                                        margin:
-                                          '0 0 8px',
-                                      }}
-                                    >
-                                      <strong>
-                                        Face value:
-                                      </strong>{' '}
-                                      {formatRawPrice(
-                                        ticket.face_value,
-                                        ticket.currency_code
-                                      )}
-                                    </p>
-
-                                    <p
-                                      style={{
-                                        fontSize:
-                                          '12px',
-                                        color:
-                                          '#6b7280',
-                                        margin:
-                                          '10px 0 0',
-                                      }}
-                                    >
-                                      Original
-                                      supplier
-                                      amounts are
-                                      preserved
-                                      without
-                                      modification.
-                                    </p>
-                                  </div>
-
-                                  <TicketPricePreview
-                                    ticket={
-                                      ticket
-                                    }
-                                  />
-
-                                  {ticket.options
-                                    ?.numbered_seat && (
-                                    <p
-                                      style={{
-                                        margin:
-                                          '12px 0 0',
-                                        fontSize:
-                                          '13px',
-                                      }}
-                                    >
-                                      Numbered
-                                      seating
-                                      reported
-                                    </p>
-                                  )}
-
-                                  <div
-                                    style={{
-                                      marginTop:
-                                        '14px',
-                                      padding:
-                                        '10px',
-                                      borderRadius:
-                                        '8px',
-                                      background:
-                                        '#fff3cd',
-                                      color:
-                                        '#5c4500',
-                                      fontSize:
-                                        '12px',
-                                      fontWeight:
-                                        700,
-                                      textAlign:
-                                        'center',
-                                    }}
-                                  >
-                                    TEST DATA —
-                                    NOT FOR SALE
-                                  </div>
-                                </div>
+                                  ticket={ticket}
+                                />
                               )
                             )}
                           </div>
@@ -1039,12 +978,13 @@ export default async function SupplierPreviewPage() {
             lineHeight: 1.7,
           }}
         >
-          We will confirm commercial pricing
-          rules with XS2Event, including
+          We will confirm XS2Event commercial
+          pricing arrangements, including
           supplier fees and taxes, before
-          creating customer-facing prices.
-          Checkout remains disabled
-          during development.
+          setting customer selling prices.
+          We will also prepare safe test
+          shopping-cart functionality.
+          Checkout remains disabled.
         </p>
       </div>
     </main>
