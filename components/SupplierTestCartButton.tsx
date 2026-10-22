@@ -15,13 +15,13 @@ type SupplierTestCartButtonProps = {
   categoryId?: string;
   stock: number;
   minOrder: number;
-  /** Legacy supplier net amount in major units; never used as cart price. */
-  price: number;
   currency: string;
-  rawNetRate: number;
-  rawFaceValue?: number;
-  /** Server-calculated Grandstand Pass price per ticket, in supplier currency. */
+  /** Server-calculated Grandstand Pass selling price in supplier currency. */
   sellingPrice?: number | null;
+  /** Temporary compatibility only. These values are intentionally unused. */
+  price?: number;
+  rawNetRate?: number;
+  rawFaceValue?: number;
 };
 
 export default function SupplierTestCartButton({
@@ -33,10 +33,7 @@ export default function SupplierTestCartButton({
   categoryId,
   stock,
   minOrder,
-  price,
   currency,
-  rawNetRate,
-  rawFaceValue,
   sellingPrice,
 }: SupplierTestCartButtonProps) {
   const { items, addItem, removeItem } = useCart();
@@ -50,14 +47,17 @@ export default function SupplierTestCartButton({
     Number.isFinite(sellingPrice) &&
     sellingPrice > 0;
 
-  // Protect existing carts from old net-priced or differently priced entries.
+  // Compare the customer selling price, not confidential supplier costs.
+  // Older cart entries at a different price must be removed first.
   const staleCartItem = Boolean(
     existingItem &&
     (!validSellingPrice ||
       typeof existingItem.price !== 'number' ||
       Math.abs(existingItem.price - sellingPrice!) > 0.005 ||
       existingItem.currency !== currency ||
-      existingItem.supplierRawNetRate !== rawNetRate)
+      existingItem.supplier !== 'XS2Event' ||
+      existingItem.supplierTicketId !== ticketId ||
+      existingItem.supplierEnvironment !== 'test')
   );
 
   const alreadyInCart = existingItem?.quantity ?? 0;
@@ -67,21 +67,12 @@ export default function SupplierTestCartButton({
   const minimumQuantity =
     Number.isInteger(minOrder) && minOrder > 0 ? minOrder : 1;
 
-  const validSupplierValues =
-    Number.isSafeInteger(rawNetRate) &&
-    rawNetRate > 0 &&
-    Number.isFinite(price) &&
-    price > 0 &&
-    (rawFaceValue === undefined ||
-      (Number.isFinite(rawFaceValue) && rawFaceValue >= 0));
-
   const validTicket =
     ticketId.length > 0 &&
     eventId.length > 0 &&
     eventName.length > 0 &&
     category.length > 0 &&
     validStock &&
-    validSupplierValues &&
     validSellingPrice &&
     isSupportedCurrency(currency);
 
@@ -123,8 +114,6 @@ export default function SupplierTestCartButton({
       supplierTicketId: ticketId,
       supplierCategoryId: categoryId,
       supplierEnvironment: 'test',
-      supplierRawNetRate: rawNetRate,
-      supplierRawFaceValue: rawFaceValue,
       maxQuantity,
     });
 
@@ -226,7 +215,7 @@ export default function SupplierTestCartButton({
       ) : !staleCartItem ? (
         <p className="mt-5 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
           {validSellingPrice
-            ? 'This offer cannot currently be added. The stock limit may have been reached, or the supplier details may be incomplete.'
+            ? 'This offer cannot currently be added. The stock limit may have been reached, or the ticket details may be incomplete.'
             : 'Test cart temporarily unavailable until the Grandstand Pass selling price is passed from the server.'}
         </p>
       ) : null}
