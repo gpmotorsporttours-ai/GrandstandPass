@@ -14,10 +14,13 @@ type SupplierTestCartButtonProps = {
   eventName: string;
   eventDate?: string;
   category: string;
+  categoryId?: string;
   stock: number;
   minOrder: number;
   price: number;
   currency: string;
+  rawNetRate: number;
+  rawFaceValue?: number;
 };
 
 export default function SupplierTestCartButton({
@@ -26,54 +29,87 @@ export default function SupplierTestCartButton({
   eventName,
   eventDate,
   category,
+  categoryId,
   stock,
   minOrder,
   price,
   currency,
+  rawNetRate,
+  rawFaceValue,
 }: SupplierTestCartButtonProps) {
   const { items, addItem } = useCart();
 
+  const [quantity, setQuantity] = useState(1);
+  const [message, setMessage] = useState('');
+
+  const cartItemId = `xs2event-test:${ticketId}`;
+
   const existingItem = items.find(
-    (item) => item.id === `xs2event-test:${ticketId}`
+    (item) => item.id === cartItemId
   );
 
   const alreadyInCart = existingItem?.quantity ?? 0;
 
-  const availableStock = Math.max(
+  const validStock =
+    Number.isInteger(stock) && stock > 0;
+
+  const maxQuantity = validStock
+    ? Math.min(10, stock)
+    : 0;
+
+  const remainingQuantity = Math.max(
     0,
-    Math.min(10, Math.floor(stock)) - alreadyInCart
+    maxQuantity - alreadyInCart
   );
 
-  const minimumQuantity = Math.max(
-    1,
-    Math.ceil(minOrder)
-  );
+  const minimumQuantity =
+    Number.isInteger(minOrder) && minOrder > 0
+      ? minOrder
+      : 1;
 
-  const canAdd =
+  const validPrice =
+    Number.isFinite(price) && price > 0;
+
+  const validSupplierValues =
+    Number.isFinite(rawNetRate) &&
+    rawNetRate >= 0 &&
+    (
+      rawFaceValue === undefined ||
+      (
+        Number.isFinite(rawFaceValue) &&
+        rawFaceValue >= 0
+      )
+    );
+
+  const validTicket =
     ticketId.length > 0 &&
     eventId.length > 0 &&
-    Number.isInteger(stock) &&
-    stock > 0 &&
-    Number.isFinite(price) &&
-    price > 0 &&
-    isSupportedCurrency(currency) &&
-    availableStock >= minimumQuantity;
+    eventName.length > 0 &&
+    category.length > 0 &&
+    validStock &&
+    validPrice &&
+    validSupplierValues &&
+    isSupportedCurrency(currency);
 
-  const [quantity, setQuantity] = useState(minimumQuantity);
-  const [message, setMessage] = useState('');
+  const canAdd =
+    validTicket &&
+    remainingQuantity >= minimumQuantity;
 
   const selectedQuantity = Math.min(
     Math.max(quantity, minimumQuantity),
-    Math.max(minimumQuantity, availableStock)
+    Math.max(minimumQuantity, remainingQuantity)
   );
 
   function handleAddToCart() {
-    if (!canAdd || !isSupportedCurrency(currency)) {
+    if (
+      !canAdd ||
+      !isSupportedCurrency(currency)
+    ) {
       return;
     }
 
     addItem({
-      id: `xs2event-test:${ticketId}`,
+      id: cartItemId,
       eventId,
       eventName,
       sport: 'Football',
@@ -83,6 +119,14 @@ export default function SupplierTestCartButton({
       quantity: selectedQuantity,
       price,
       currency,
+
+      supplier: 'XS2Event',
+      supplierTicketId: ticketId,
+      supplierCategoryId: categoryId,
+      supplierEnvironment: 'test',
+      supplierRawNetRate: rawNetRate,
+      supplierRawFaceValue: rawFaceValue,
+      maxQuantity,
     });
 
     setMessage(
@@ -121,24 +165,35 @@ export default function SupplierTestCartButton({
           margin: '0 0 12px',
         }}
       >
-        Add this supplier ticket to your development
-        shopping cart. This does not reserve tickets
-        with XS2Event or create a purchase.
+        Add this XS2Event test offer to your
+        development cart. No supplier reservation
+        or payment will be created.
       </p>
 
-      <p style={{ margin: '0 0 12px', fontSize: '14px' }}>
+      <p
+        style={{
+          margin: '0 0 12px',
+          fontSize: '14px',
+        }}
+      >
         <strong>Supplier net rate:</strong>{' '}
         {isSupportedCurrency(currency)
           ? formatCurrency(price, currency)
-          : 'Unavailable'}
-        {' '}per ticket
+          : 'Unavailable'}{' '}
+        per ticket
       </p>
 
-      <p style={{ margin: '0 0 12px', fontSize: '13px' }}>
-        <strong>Already in cart:</strong> {alreadyInCart}
+      <p
+        style={{
+          margin: '0 0 12px',
+          fontSize: '13px',
+        }}
+      >
+        <strong>Already in cart:</strong>{' '}
+        {alreadyInCart}
         {' | '}
         <strong>Remaining test quantity:</strong>{' '}
-        {availableStock}
+        {remainingQuantity}
       </p>
 
       {canAdd ? (
@@ -176,11 +231,17 @@ export default function SupplierTestCartButton({
             {Array.from(
               {
                 length:
-                  availableStock - minimumQuantity + 1,
+                  remainingQuantity -
+                  minimumQuantity +
+                  1,
               },
-              (_, index) => minimumQuantity + index
+              (_, index) =>
+                minimumQuantity + index
             ).map((value) => (
-              <option key={value} value={value}>
+              <option
+                key={value}
+                value={value}
+              >
                 {value}
               </option>
             ))}
@@ -211,10 +272,9 @@ export default function SupplierTestCartButton({
             margin: 0,
           }}
         >
-          This offer cannot currently be added to
-          the test cart. The stock limit may have
-          been reached, or ticket details may be
-          incomplete.
+          This offer cannot currently be added.
+          The stock limit may have been reached,
+          or the supplier details may be incomplete.
         </p>
       )}
 
@@ -240,8 +300,10 @@ export default function SupplierTestCartButton({
           margin: '12px 0 0',
         }}
       >
-        TEST ONLY — Supplier net rates are not
-        final customer selling prices. Checkout
+        TEST DATA — NOT FOR SALE. The displayed
+        price is the supplier net rate, not a
+        Grandstand Pass selling price. Supplier
+        availability can change. Checkout
         remains disabled.
       </p>
     </div>
