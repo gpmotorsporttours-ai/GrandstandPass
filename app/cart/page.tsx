@@ -164,6 +164,12 @@ export default function CartPage() {
 
         const results = await Promise.all(
           pricedItems.map(async (item) => {
+            // Recheck inside the callback so TypeScript narrows the currency.
+            if (!isValidPrice(item.price, item.currency)) {
+              throw new Error('Invalid ticket price or currency');
+            }
+            const supplierCurrency = item.currency;
+
             const supplierTest =
               item.supplier === 'XS2Event' &&
               item.supplierEnvironment === 'test';
@@ -185,14 +191,14 @@ export default function CartPage() {
                 const allowanceConversion = await convertAmount(
                   5,
                   'EUR',
-                  item.currency!
+                  supplierCurrency
                 );
                 eurToSupplierRate = allowanceConversion.displayAmount / 5;
               }
 
               breakdown = calculateSupplierTicketPrice({
                 netRateMinor: item.supplierRawNetRate!,
-                supplierCurrency: item.currency!,
+                supplierCurrency,
                 eurToSupplierRate,
               });
               if (!breakdown) {
@@ -203,7 +209,7 @@ export default function CartPage() {
 
             const pricing = await convertAmount(
               amount,
-              item.currency!,
+              supplierCurrency,
               displayCurrency
             );
             return { id: item.id, pricing, breakdown };
@@ -507,7 +513,7 @@ export default function CartPage() {
                               : 'Original unit price:'}{' '}
                             {formatOriginalPrice(
                               item.price!,
-                              item.currency!
+                              supplierCurrency
                             )}
                           </p>
 
@@ -517,21 +523,21 @@ export default function CartPage() {
                                 Handling allowance:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.handlingAllowance,
-                                  item.currency!
+                                  supplierCurrency
                                 )}
                               </p>
                               <p>
                                 15% markup:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.markupAmount,
-                                  item.currency!
+                                  supplierCurrency
                                 )}
                               </p>
                               <p className="font-bold text-navy">
                                 Indicative Grandstand Pass unit price:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.indicativeSellingPrice,
-                                  item.currency!
+                                  supplierCurrency
                                 )}
                               </p>
                             </div>
