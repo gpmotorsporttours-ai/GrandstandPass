@@ -398,15 +398,15 @@ export default function EventBrowser({
 
                       <p className="mt-1 text-xs muted">
                         Ticket availability and indicative
-                        prices are shown separately in
-                        the supplier preview.
+                        Grandstand Pass prices are shown
+                        on the match ticket page.
                       </p>
 
                       <a
                         href={
                           event.supplierEventId
-                            ? `/supplier-preview?eventId=${encodeURIComponent(event.supplierEventId)}`
-                            : '/supplier-preview'
+                            ? `/football/tickets?eventId=${encodeURIComponent(event.supplierEventId)}`
+                            : '/football'
                         }
                         className="mt-4 inline-flex items-center justify-center rounded-lg bg-navy px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-blue"
                       >
