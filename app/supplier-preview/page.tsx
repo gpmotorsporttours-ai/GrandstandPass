@@ -590,7 +590,17 @@ function TicketOffer({
   );
 }
 
-export default async function SupplierPreviewPage() {
+export default async function SupplierPreviewPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ eventId?: string | string[] }>;
+}) {
+  const resolvedSearchParams = await searchParams;
+  const requestedEventId =
+    typeof resolvedSearchParams?.eventId === 'string'
+      ? resolvedSearchParams.eventId
+      : '';
+
   const today = new Date().toISOString().slice(0, 10);
 
   let events: SupplierEvent[] = [];
@@ -629,8 +639,14 @@ export default async function SupplierPreviewPage() {
       'We could not load XS2Event events right now. Please try again later.';
   }
 
+  // A link from the Football browser selects one XS2Event match.
+  // Direct visits without an eventId still show the full test catalogue.
+  const visibleEvents = requestedEventId
+    ? events.filter(event => event.event_id === requestedEventId)
+    : events;
+
   const eventsWithTickets = await Promise.all(
-    events.map(getEventTickets)
+    visibleEvents.map(getEventTickets)
   );
 
   return (
@@ -732,6 +748,24 @@ export default async function SupplierPreviewPage() {
         {totalEvents}
       </div>
 
+      {requestedEventId && (
+        <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-5">
+          <p className="font-bold text-navy">
+            {visibleEvents.length > 0
+              ? `Viewing tickets for ${visibleEvents[0].event_name || 'selected match'}`
+              : 'Selected match is not available in the current test feed'}
+          </p>
+          <p className="mt-2 text-sm text-slate-600">
+            {visibleEvents.length > 0
+              ? 'Only ticket offers for this match are shown below.'
+              : 'XS2Event test inventory can change or expire. Return to Football to select another match.'}
+          </p>
+          <a href="/football" className="mt-3 inline-block font-bold text-blue-700 underline">
+            Back to Football
+          </a>
+        </div>
+      )}
+
       <SupplierCurrencyPreview />
 
       {errorMessage && (
@@ -750,7 +784,8 @@ export default async function SupplierPreviewPage() {
       )}
 
       {!errorMessage &&
-        events.length === 0 && (
+        visibleEvents.length === 0 &&
+        !requestedEventId && (
           <div
             style={{
               padding: '40px 24px',
