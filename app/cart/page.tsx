@@ -513,7 +513,7 @@ export default function CartPage() {
                               : 'Original unit price:'}{' '}
                             {formatOriginalPrice(
                               item.price!,
-                              supplierCurrency
+                              item.currency!
                             )}
                           </p>
 
@@ -523,21 +523,21 @@ export default function CartPage() {
                                 Handling allowance:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.handlingAllowance,
-                                  supplierCurrency
+                                  item.currency!
                                 )}
                               </p>
                               <p>
                                 15% markup:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.markupAmount,
-                                  supplierCurrency
+                                  item.currency!
                                 )}
                               </p>
                               <p className="font-bold text-navy">
                                 Indicative Grandstand Pass unit price:{' '}
                                 {formatOriginalPrice(
                                   sellingBreakdown.indicativeSellingPrice,
-                                  supplierCurrency
+                                  item.currency!
                                 )}
                               </p>
                             </div>
