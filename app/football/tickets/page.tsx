@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { CalendarDays, MapPin, Ticket } from 'lucide-react';
 import { xs2eventGet } from '../../../lib/xs2event';
 import { calculateSupplierTicketPrice } from '../../../lib/supplierPricing';
@@ -87,7 +86,37 @@ export default async function FootballTicketsPage({
 }) {
   const params = await searchParams;
   const eventId = typeof params.eventId === 'string' ? params.eventId : '';
-  if (!eventId || eventId.length > 150) notFound();
+  if (!eventId || eventId.length > 150) {
+    return (
+      <main className="container-wide py-10 md:py-14">
+        <Link href="/football" className="text-blue font-bold hover:underline">
+          ← Back to Football
+        </Link>
+        <section className="mt-8 rounded-2xl border bg-white p-8 md:p-12">
+          <div className="flex items-center gap-3">
+            <Ticket size={28} className="text-blue" />
+            <h1 className="text-2xl md:text-3xl font-black text-navy">
+              Choose a football match first
+            </h1>
+          </div>
+          <p className="muted mt-4 max-w-2xl">
+            Browse football matches and select an event to view its ticket
+            categories, indicative Grandstand Pass prices and availability.
+          </p>
+          <Link
+            href="/football"
+            className="mt-6 inline-flex items-center justify-center rounded-xl bg-navy px-6 py-3 font-bold text-white hover:opacity-90"
+          >
+            Browse Football Matches →
+          </Link>
+          <p className="muted mt-6 text-xs">
+            XS2Event test tickets are not for sale. No reservations or payments
+            can be made, and checkout remains disabled.
+          </p>
+        </section>
+      </main>
+    );
+  }
 
   let event: SupplierEvent | undefined;
   let tickets: PricedTicket[] = [];
