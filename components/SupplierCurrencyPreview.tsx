@@ -59,10 +59,22 @@ export default function SupplierCurrencyPreview() {
           lineHeight: 1.6,
         }}
       >
-        The supplier ticket offers below show
-        indicative currency equivalents in all
-        five supported currencies, using our
-        connected exchange-rate service.
+        Ticket prices are calculated using the
+        Grandstand Pass pricing structure, which
+        includes a €5 handling allowance per
+        ticket and a 15% markup.
+      </p>
+
+      <p
+        style={{
+          margin: '0 0 10px',
+          lineHeight: 1.6,
+        }}
+      >
+        Indicative currency equivalents use
+        our connected exchange-rate service.
+        Exchange rates may change, and the
+        final customer price is not yet confirmed.
       </p>
 
       <p
@@ -73,13 +85,13 @@ export default function SupplierCurrencyPreview() {
         }}
       >
         <strong>Development notice:</strong>{' '}
-        These conversions are based on XS2Event
-        test supplier net rates. They are not
-        final customer selling prices. Supplier
-        fees, applicable taxes and Grandstand
-        Pass margins have not yet been applied.
-        Ticket reservations and checkout remain
-        disabled.
+        XS2Event test tickets are not for sale.
+        Displayed prices are indicative and may
+        exclude applicable taxes, payment charges
+        and other costs. Ticket availability is
+        not guaranteed. No supplier reservation
+        or payment is created, and checkout
+        remains disabled.
       </p>
     </section>
   );
