@@ -145,7 +145,7 @@ export default function Header() {
                 )
               }
               aria-label="Preferred display currency"
-              title="Display currency preference; prices are not converted yet"
+              title="Choose your preferred display currency"
               className="bg-transparent text-xs sm:text-sm font-bold text-navy cursor-pointer outline-none max-w-[82px]"
             >
               {currencies.map((item) => (
