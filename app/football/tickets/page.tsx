@@ -287,11 +287,9 @@ export default async function FootballTicketsPage({
                           categoryId={ticket.category_id}
                           stock={ticket.stock!}
                           minOrder={ticket.min_order ?? 1}
-                          price={ticket.net_rate! / 100}
                           sellingPrice={sellingPrice}
+                          displayPrices={displayPrices}
                           currency={currency!}
-                          rawNetRate={ticket.net_rate!}
-                          rawFaceValue={typeof ticket.face_value === 'number' && Number.isFinite(ticket.face_value) && ticket.face_value >= 0 ? ticket.face_value : undefined}
                         />
                       ) : (
                         <p className="mt-4 text-sm text-amber-800">This offer cannot be added to the test cart because pricing or supplier details are unavailable.</p>
