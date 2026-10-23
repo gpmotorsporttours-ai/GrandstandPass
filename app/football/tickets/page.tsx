@@ -3,7 +3,8 @@ import { CalendarDays, MapPin, Ticket } from 'lucide-react';
 import { xs2eventGet } from '../../../lib/xs2event';
 import { calculateSupplierTicketPrice } from '../../../lib/supplierPricing';
 import { getTicketDisplayPrice } from '../../../lib/ticketPricing';
-import { formatCurrency, isSupportedCurrency } from '../../../lib/currency';
+import { isSupportedCurrency } from '../../../lib/currency';
+import FootballDisplayPrice from '../../../components/FootballDisplayPrice';
 import SupplierTestCartButton from '../../../components/SupplierTestCartButton';
 
 export const runtime = 'nodejs';
@@ -38,7 +39,49 @@ type SupplierTicket = {
 
 type TicketsResponse = { tickets?: SupplierTicket[] };
 
-type PricedTicket = { ticket: SupplierTicket; sellingPrice: number | null };
+type DisplayCurrency = 'ZAR' | 'EUR' | 'USD' | 'GBP' | 'AED';
+type CurrencyAmounts = Partial<Record<DisplayCurrency, number>>;
+type PricedTicket = {
+  ticket: SupplierTicket;
+  sellingPrice: number | null;
+  displayPrices: CurrencyAmounts;
+};
+
+const displayCurrencies: DisplayCurrency[] = ['ZAR', 'EUR', 'USD', 'GBP', 'AED'];
+
+async function getDisplayPrices(
+  sellingPrice: number | null,
+  currency: string | undefined
+): Promise<CurrencyAmounts> {
+  if (sellingPrice === null || !isSupportedCurrency(currency)) return {};
+
+  const results = await Promise.all(
+    displayCurrencies.map(async targetCurrency => {
+      if (targetCurrency === currency) {
+        return [targetCurrency, sellingPrice] as const;
+      }
+      try {
+        const converted = await getTicketDisplayPrice(
+          { amount: sellingPrice, currency },
+          targetCurrency
+        );
+        const amount = converted?.displayAmount;
+        if (typeof amount === 'number' && Number.isFinite(amount) && amount > 0) {
+          return [targetCurrency, amount] as const;
+        }
+      } catch {
+        // The original selling price remains available if FX fails.
+      }
+      return [targetCurrency, null] as const;
+    })
+  );
+
+  const prices: CurrencyAmounts = {};
+  for (const [targetCurrency, amount] of results) {
+    if (amount !== null) prices[targetCurrency] = amount;
+  }
+  return prices;
+}
 
 function formatEventDate(value?: string): string {
   if (!value) return 'Date to be confirmed';
@@ -143,9 +186,14 @@ export default async function FootballTicketsPage({
         Number.isInteger(ticket.stock) && ticket.stock > 0 &&
         (!ticket.event_id || ticket.event_id === eventId)
       );
-      tickets = await Promise.all(available.map(async ticket => ({
-        ticket, sellingPrice: await getSellingPrice(ticket),
-      })));
+      tickets = await Promise.all(available.map(async ticket => {
+        const sellingPrice = await getSellingPrice(ticket);
+        return {
+          ticket,
+          sellingPrice,
+          displayPrices: await getDisplayPrices(sellingPrice, ticket.currency_code),
+        };
+      }));
     }
   } catch (error) {
     console.error('Football ticket page failed to load:', error instanceof Error ? error.name : 'Unknown error');
@@ -200,7 +248,7 @@ export default async function FootballTicketsPage({
               </div>
             ) : (
               <div className="mt-6 grid gap-6 lg:grid-cols-2">
-                {tickets.map(({ ticket, sellingPrice }, index) => {
+                {tickets.map(({ ticket, sellingPrice, displayPrices }, index) => {
                   const currency = ticket.currency_code;
                   const validCurrency = isSupportedCurrency(currency);
                   const validNet = typeof ticket.net_rate === 'number' && Number.isSafeInteger(ticket.net_rate) && ticket.net_rate > 0;
@@ -219,12 +267,15 @@ export default async function FootballTicketsPage({
                       {ticket.options?.pairs_only && <p className="muted text-sm mt-2">Tickets may require purchase in pairs</p>}
                       <div className="mt-5 rounded-xl bg-ice p-4">
                         <p className="text-xs font-bold uppercase tracking-wide text-blue">Indicative Grandstand Pass price</p>
-                        <p className="mt-1 text-3xl font-black text-navy">
-                          {sellingPrice !== null && validCurrency
-                            ? formatCurrency(sellingPrice, currency)
-                            : 'Price unavailable'}
-                        </p>
-                        <p className="muted text-xs mt-1">Per ticket · Includes handling allowance and markup</p>
+                        {sellingPrice !== null && validCurrency ? (
+                          <FootballDisplayPrice
+                            sellingPrice={sellingPrice}
+                            currency={currency}
+                            displayPrices={displayPrices}
+                          />
+                        ) : (
+                          <p className="mt-1 text-2xl font-black text-navy">Price unavailable</p>
+                        )}
                       </div>
                       {canAdd ? (
                         <SupplierTestCartButton
