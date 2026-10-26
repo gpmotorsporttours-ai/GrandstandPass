@@ -6,6 +6,8 @@ import { Search, SlidersHorizontal } from 'lucide-react';
 import { events } from '../lib/data';
 import EventCard from './EventCard';
 
+const SUPPLIER_EVENTS_PER_PAGE = 15;
+
 const otherSports = [
   'Basketball',
   'Boxing',
@@ -126,6 +128,7 @@ export default function EventBrowser({
   const [sport, setSport] = useState(initialSport);
   const [region, setRegion] = useState(initialRegion);
   const [sort, setSort] = useState('date');
+  const [supplierPage, setSupplierPage] = useState(1);
 
   const matchesSport = (event: ListedEvent) => {
     if (sport === 'All') return true;
@@ -227,6 +230,29 @@ export default function EventBrowser({
     query,
   ]);
 
+  const supplierPageCount = Math.ceil(
+    filteredSupplierEvents.length / SUPPLIER_EVENTS_PER_PAGE
+  );
+
+  const currentSupplierPage = Math.min(
+    supplierPage,
+    Math.max(1, supplierPageCount)
+  );
+
+  const visibleSupplierEvents = filteredSupplierEvents.slice(
+    (currentSupplierPage - 1) * SUPPLIER_EVENTS_PER_PAGE,
+    currentSupplierPage * SUPPLIER_EVENTS_PER_PAGE
+  );
+
+  const supplierPageNumbers = Array.from(
+    { length: supplierPageCount },
+    (_, index) => index + 1
+  ).filter(page =>
+    page === 1 ||
+    page === supplierPageCount ||
+    Math.abs(page - currentSupplierPage) <= 1
+  );
+
   const competitions =
     sport === 'Rugby'
       ? rugbyCompetitions
@@ -291,7 +317,10 @@ export default function EventBrowser({
             placeholder="Search events or cities"
             aria-label="Search events or cities"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => {
+              setQuery(e.target.value);
+              setSupplierPage(1);
+            }}
           />
         </label>
 
@@ -301,6 +330,7 @@ export default function EventBrowser({
           onChange={e => {
             setSport(e.target.value);
             setRegion('All');
+            setSupplierPage(1);
           }}
           aria-label="Sport"
         >
@@ -316,7 +346,10 @@ export default function EventBrowser({
         <select
           className="field"
           value={region}
-          onChange={e => setRegion(e.target.value)}
+          onChange={e => {
+            setRegion(e.target.value);
+            setSupplierPage(1);
+          }}
           aria-label="Region"
         >
           <option value="All">All</option>
@@ -331,7 +364,10 @@ export default function EventBrowser({
         <select
           className="field"
           value={sort}
-          onChange={e => setSort(e.target.value)}
+          onChange={e => {
+            setSort(e.target.value);
+            setSupplierPage(1);
+          }}
           aria-label="Sort events"
         >
           <option value="date">Soonest first</option>
@@ -362,7 +398,7 @@ export default function EventBrowser({
               </div>
 
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredSupplierEvents.map(event => (
+                {visibleSupplierEvents.map(event => (
                   <article
                     key={event.id}
                     className="rounded-xl border border-amber-200 bg-white p-5 shadow-sm"
@@ -418,6 +454,60 @@ export default function EventBrowser({
                   </article>
                 ))}
               </div>
+
+              {supplierPageCount > 1 && (
+                <nav
+                  aria-label="Supplier match pages"
+                  className="mt-8 flex flex-wrap items-center justify-center gap-2"
+                >
+                  <button
+                    type="button"
+                    disabled={currentSupplierPage === 1}
+                    onClick={() => setSupplierPage(currentSupplierPage - 1)}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-navy disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
+
+                  {supplierPageNumbers.map((page, index) => (
+                    <span key={page} className="contents">
+                      {index > 0 && page > supplierPageNumbers[index - 1] + 1 && (
+                        <span aria-hidden="true" className="px-1 text-slate-500">…</span>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Go to supplier match page ${page}`}
+                        aria-current={page === currentSupplierPage ? 'page' : undefined}
+                        onClick={() => setSupplierPage(page)}
+                        className={
+                          'min-w-10 rounded-lg border px-3 py-2 text-sm font-semibold ' +
+                          (page === currentSupplierPage
+                            ? 'border-navy bg-navy text-white'
+                            : 'border-slate-300 bg-white text-navy hover:bg-ice')
+                        }
+                      >
+                        {page}
+                      </button>
+                    </span>
+                  ))}
+
+                  <button
+                    type="button"
+                    disabled={currentSupplierPage === supplierPageCount}
+                    onClick={() => setSupplierPage(currentSupplierPage + 1)}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-navy disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+
+                  <span className="w-full text-center text-xs text-slate-600">
+                    Page {currentSupplierPage} of {supplierPageCount} · Showing{' '}
+                    {(currentSupplierPage - 1) * SUPPLIER_EVENTS_PER_PAGE + 1}–
+                    {Math.min(currentSupplierPage * SUPPLIER_EVENTS_PER_PAGE, filteredSupplierEvents.length)}{' '}
+                    of {filteredSupplierEvents.length} test matches
+                  </span>
+                </nav>
+              )}
             </div>
           )}
 
@@ -500,6 +590,7 @@ export default function EventBrowser({
               setQuery('');
               setRegion('All');
               setSport(initialSport);
+              setSupplierPage(1);
             }}
           >
             Clear filters
