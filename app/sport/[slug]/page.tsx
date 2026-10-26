@@ -1,6 +1,7 @@
 
 import { notFound } from 'next/navigation';
 import EventBrowser from '../../../components/EventBrowser';
+import Formula1EventBrowser from '../../../components/Formula1EventBrowser';
 import { sports, sportSlug } from '../../../lib/data';
 
 const otherSports = [
@@ -28,6 +29,8 @@ export default async function SportPage({
     notFound();
   }
 
+  const isFormula1 = sport === 'Formula 1';
+
   return (
     <>
       <section className="bg-navy text-white py-16">
@@ -41,14 +44,19 @@ export default async function SportPage({
           </h1>
 
           <p className="text-slate-300 mt-4">
-            Discover upcoming {sport.toLowerCase()} experiences
-            around the world.
+            {isFormula1
+              ? 'Explore upcoming Formula 1 Grand Prix events and discover available XS2Event test ticket offers.'
+              : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
           </p>
         </div>
       </section>
 
       <div className="container-wide">
-        <EventBrowser initialSport={sport} />
+        {isFormula1 ? (
+          <Formula1EventBrowser />
+        ) : (
+          <EventBrowser initialSport={sport} />
+        )}
       </div>
     </>
   );
