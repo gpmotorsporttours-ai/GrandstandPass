@@ -141,6 +141,7 @@ export default function EventBrowser({
   const [region, setRegion] = useState(initialRegion);
   const [sort, setSort] = useState('date');
   const [supplierPage, setSupplierPage] = useState(1);
+  const [availableOffersOnly, setAvailableOffersOnly] = useState(false);
   const [availabilityByEvent, setAvailabilityByEvent] = useState<
     Record<string, AvailabilityStatus>
   >({});
@@ -244,7 +245,8 @@ export default function EventBrowser({
         return (
           sportMatches &&
           regionMatches &&
-          searchMatches
+          searchMatches &&
+          !(availableOffersOnly && event.sport === 'Football')
         );
       })
       .sort((a, b) =>
@@ -252,7 +254,7 @@ export default function EventBrowser({
           ? a.categories[0].price - b.categories[0].price
           : a.date.localeCompare(b.date)
       );
-  }, [query, sport, region, sort]);
+  }, [query, sport, region, sort, availableOffersOnly]);
 
   const filteredSupplierEvents = useMemo(() => {
     if (!showSupplierFootball) {
@@ -277,7 +279,12 @@ export default function EventBrowser({
           .toLowerCase()
           .includes(search);
 
-        return regionMatches && searchMatches;
+        const availabilityMatches =
+          !availableOffersOnly ||
+          (Boolean(event.supplierEventId) &&
+            availabilityByEvent[event.supplierEventId!] === 'available');
+
+        return regionMatches && searchMatches && availabilityMatches;
       })
       .sort((a, b) =>
         a.date.localeCompare(b.date)
@@ -287,6 +294,8 @@ export default function EventBrowser({
     showSupplierFootball,
     region,
     query,
+    availableOffersOnly,
+    availabilityByEvent,
   ]);
 
   const supplierPageCount = Math.ceil(
@@ -438,6 +447,49 @@ export default function EventBrowser({
           )}
         </select>
       </div>
+
+      {showSupplierFootball && (
+        <div className="mb-7 rounded-xl border border-slate-200 bg-white p-4">
+          <label className="flex cursor-pointer items-start gap-3 text-sm font-bold text-navy">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 accent-blue-600"
+              checked={availableOffersOnly}
+              onChange={e => {
+                setAvailableOffersOnly(e.target.checked);
+                setSupplierPage(1);
+              }}
+            />
+            <span>Available ticket offers only</span>
+          </label>
+          <p className="muted mt-2 text-xs">
+            {availableOffersOnly
+              ? 'Showing only XS2Event football matches confirmed to have ticket offers during this browsing session. Unchecked matches are hidden, not considered unavailable. Turn this filter off to check more matches.'
+              : 'Check individual XS2Event match cards to confirm reported ticket offers. This filter uses only matches checked during this browsing session.'}
+          </p>
+        </div>
+      )}
+
+      {availableOffersOnly && showSupplierFootball && filteredSupplierEvents.length === 0 && (
+        <div role="status" className="mb-7 rounded-xl border border-slate-200 bg-ice p-5">
+          <p className="font-bold text-navy">No confirmed ticket offers match these filters yet.</p>
+          <p className="muted mt-2 text-sm">
+            This does not mean the other matches have no tickets. Turn off
+            &ldquo;Available ticket offers only&rdquo; to check more matches,
+            or change your country and search filters.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setAvailableOffersOnly(false);
+              setSupplierPage(1);
+            }}
+            className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-navy hover:bg-ice"
+          >
+            Show unchecked matches
+          </button>
+        </div>
+      )}
 
       {totalEvents > 0 ? (
         <div className="space-y-12">
@@ -686,6 +738,7 @@ export default function EventBrowser({
               setQuery('');
               setRegion('All');
               setSport(initialSport);
+              setAvailableOffersOnly(false);
               setSupplierPage(1);
             }}
           >
