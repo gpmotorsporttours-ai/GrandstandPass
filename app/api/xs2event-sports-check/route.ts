@@ -1,51 +1,65 @@
 
 import { NextResponse } from 'next/server';
-import { getXS2EventSports } from '../../../lib/xs2event';
+import { xs2eventGet } from '../../../lib/xs2event';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const response: unknown = await getXS2EventSports();
+    const today = new Date().toISOString().slice(0, 10);
+
+    const params = new URLSearchParams({
+      sport_type: 'formula1',
+      date_stop: `ge:${today}`,
+      sorting: 'date_start:asc',
+      page_size: '50',
+      page: '1',
+    });
+
+    const response = await xs2eventGet<unknown>(
+      `/events?${params.toString()}`
+    );
 
     const data =
       response &&
       typeof response === 'object' &&
-      'sports' in response &&
-      Array.isArray(response.sports)
-        ? response.sports
+      'events' in response &&
+      Array.isArray(response.events)
+        ? response.events
         : [];
 
-    const sports = data.map((item: unknown) => {
+    const events = data.map((item: unknown) => {
       if (
         !item ||
         typeof item !== 'object' ||
         Array.isArray(item)
       ) {
-        return { fields: [] };
+        return {};
       }
 
       const record = item as Record<string, unknown>;
 
-      return {
-        fields: Object.keys(record),
-        values: Object.fromEntries(
-          Object.entries(record).filter(
-            ([, value]) =>
+      return Object.fromEntries(
+        Object.entries(record).filter(
+          ([key, value]) =>
+            !/price|cost|net|commission|token|secret|key/i.test(key) &&
+            (
               typeof value === 'string' ||
               typeof value === 'number' ||
               typeof value === 'boolean'
-          )
-        ),
-      };
+            )
+        )
+      );
     });
 
     return NextResponse.json(
       {
         testData: true,
-        total: sports.length,
-        sports,
+        requestedSport: 'formula1',
+        dateFilter: today,
+        eventsReturned: events.length,
+        events,
       },
       {
         headers: {
@@ -55,8 +69,11 @@ export async function GET() {
     );
   } catch {
     return NextResponse.json(
-      { error: 'Unable to retrieve test sports.' },
-      { status: 503 }
+      {
+        success: false,
+        message: 'Unable to retrieve Formula 1 test events.',
+      },
+      { status: 502 }
     );
   }
 }
