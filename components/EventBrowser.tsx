@@ -1,12 +1,58 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search, SlidersHorizontal } from 'lucide-react';
 import { events } from '../lib/data';
 import EventCard from './EventCard';
 
 const SUPPLIER_EVENTS_PER_PAGE = 15;
+const AVAILABILITY_STORAGE_KEY = 'grandstand-pass-test-football-availability-v1';
+const AVAILABILITY_TTL_MS = 5 * 60 * 1000;
+
+type SavedAvailability = {
+  status: 'available' | 'unavailable';
+  checkedAt: number;
+};
+
+function readSavedAvailability(): Record<string, SavedAvailability> {
+  try {
+    const raw = window.sessionStorage.getItem(AVAILABILITY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+    const now = Date.now();
+    const valid: Record<string, SavedAvailability> = {};
+    for (const [id, value] of Object.entries(parsed)) {
+      if (!id || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const entry = value as Partial<SavedAvailability>;
+      if (
+        (entry.status === 'available' || entry.status === 'unavailable') &&
+        typeof entry.checkedAt === 'number' &&
+        Number.isFinite(entry.checkedAt) &&
+        entry.checkedAt <= now &&
+        now - entry.checkedAt < AVAILABILITY_TTL_MS
+      ) {
+        valid[id] = { status: entry.status, checkedAt: entry.checkedAt };
+      }
+    }
+    return valid;
+  } catch {
+    return {};
+  }
+}
+
+function saveAvailability(eventId: string, status: SavedAvailability['status']) {
+  try {
+    const saved = readSavedAvailability();
+    saved[eventId] = { status, checkedAt: Date.now() };
+    window.sessionStorage.setItem(AVAILABILITY_STORAGE_KEY, JSON.stringify(saved));
+  } catch {
+    // Session storage may be disabled. Availability checks still work in memory.
+  }
+}
+
 
 type AvailabilityStatus =
   | 'checking'
@@ -146,6 +192,28 @@ export default function EventBrowser({
     Record<string, AvailabilityStatus>
   >({});
 
+  useEffect(() => {
+    const restore = () => {
+      const saved = readSavedAvailability();
+      setAvailabilityByEvent(previous => {
+        const next: Record<string, AvailabilityStatus> = {};
+        // Keep in-flight checks and errors for this mounted page only.
+        for (const [id, status] of Object.entries(previous)) {
+          if (status === 'checking' || status === 'error') next[id] = status;
+        }
+        for (const [id, entry] of Object.entries(saved)) {
+          if (next[id] !== 'checking') next[id] = entry.status;
+        }
+        return next;
+      });
+    };
+
+    restore();
+    // Remove expired checks even when the visitor keeps this page open.
+    const interval = window.setInterval(restore, 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   async function checkAvailability(eventId: string) {
     if (!eventId || availabilityByEvent[eventId] === 'checking') {
       return;
@@ -176,11 +244,11 @@ export default function EventBrowser({
         throw new Error('Unexpected availability response');
       }
 
+      const status = result.hasAvailableTickets ? 'available' : 'unavailable';
+      saveAvailability(eventId, status);
       setAvailabilityByEvent(previous => ({
         ...previous,
-        [eventId]: result.hasAvailableTickets
-          ? 'available'
-          : 'unavailable',
+        [eventId]: status,
       }));
     } catch {
       setAvailabilityByEvent(previous => ({
@@ -464,8 +532,8 @@ export default function EventBrowser({
           </label>
           <p className="muted mt-2 text-xs">
             {availableOffersOnly
-              ? 'Showing only XS2Event football matches confirmed to have ticket offers during this browsing session. Unchecked matches are hidden, not considered unavailable. Turn this filter off to check more matches.'
-              : 'Check individual XS2Event match cards to confirm reported ticket offers. This filter uses only matches checked during this browsing session.'}
+              ? 'Showing only XS2Event football matches confirmed to have ticket offers in this browser tab within the last five minutes. Unchecked or expired matches are hidden, not considered unavailable. Turn this filter off to check more matches.'
+              : 'Check individual XS2Event match cards to confirm reported ticket offers. Checked results are remembered in this browser tab for five minutes, then require a fresh check.'}
           </p>
         </div>
       )}
