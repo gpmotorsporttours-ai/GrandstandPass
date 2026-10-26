@@ -8,6 +8,18 @@ import EventCard from './EventCard';
 
 const SUPPLIER_EVENTS_PER_PAGE = 15;
 
+type AvailabilityStatus =
+  | 'checking'
+  | 'available'
+  | 'unavailable'
+  | 'error';
+
+type AvailabilityResponse = {
+  testData?: boolean;
+  eventId?: string;
+  hasAvailableTickets?: boolean;
+};
+
 const otherSports = [
   'Basketball',
   'Boxing',
@@ -129,6 +141,53 @@ export default function EventBrowser({
   const [region, setRegion] = useState(initialRegion);
   const [sort, setSort] = useState('date');
   const [supplierPage, setSupplierPage] = useState(1);
+  const [availabilityByEvent, setAvailabilityByEvent] = useState<
+    Record<string, AvailabilityStatus>
+  >({});
+
+  async function checkAvailability(eventId: string) {
+    if (!eventId || availabilityByEvent[eventId] === 'checking') {
+      return;
+    }
+
+    setAvailabilityByEvent(previous => ({
+      ...previous,
+      [eventId]: 'checking',
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/football-test-availability?eventId=${encodeURIComponent(eventId)}`,
+        { cache: 'no-store' }
+      );
+
+      if (!response.ok) {
+        throw new Error('Availability check failed');
+      }
+
+      const result: AvailabilityResponse = await response.json();
+
+      if (
+        result.testData !== true ||
+        result.eventId !== eventId ||
+        typeof result.hasAvailableTickets !== 'boolean'
+      ) {
+        throw new Error('Unexpected availability response');
+      }
+
+      setAvailabilityByEvent(previous => ({
+        ...previous,
+        [eventId]: result.hasAvailableTickets
+          ? 'available'
+          : 'unavailable',
+      }));
+    } catch {
+      setAvailabilityByEvent(previous => ({
+        ...previous,
+        [eventId]: 'error',
+      }));
+    }
+  }
 
   const matchesSport = (event: ListedEvent) => {
     if (sport === 'All') return true;
@@ -435,10 +494,47 @@ export default function EventBrowser({
                       </p>
 
                       <p className="mt-1 text-xs muted">
-                        Ticket availability and indicative
-                        Grandstand Pass prices are shown
-                        on the match ticket page.
+                        Indicative Grandstand Pass prices are
+                        shown on the match ticket page.
                       </p>
+
+                      {event.supplierEventId && (
+                        <div className="mt-4 rounded-lg bg-slate-50 p-3">
+                          <p
+                            role="status"
+                            aria-live="polite"
+                            className="text-sm font-semibold text-navy"
+                          >
+                            {availabilityByEvent[event.supplierEventId] === 'checking'
+                              ? 'Checking test ticket availability...'
+                              : availabilityByEvent[event.supplierEventId] === 'available'
+                                ? '✓ Ticket offers reported available'
+                                : availabilityByEvent[event.supplierEventId] === 'unavailable'
+                                  ? 'No ticket offers currently reported'
+                                  : availabilityByEvent[event.supplierEventId] === 'error'
+                                    ? 'Availability check unsuccessful'
+                                    : 'Availability not yet checked'}
+                          </p>
+                          <p className="mt-1 text-xs muted">
+                            Test supplier data only. Stock may change;
+                            this does not guarantee a priced offer.
+                          </p>
+                          <button
+                            type="button"
+                            disabled={availabilityByEvent[event.supplierEventId] === 'checking'}
+                            onClick={() => checkAvailability(event.supplierEventId!)}
+                            className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-navy hover:bg-ice disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {availabilityByEvent[event.supplierEventId] === 'checking'
+                              ? 'Checking...'
+                              : availabilityByEvent[event.supplierEventId] === 'error'
+                                ? 'Try availability check again'
+                                : availabilityByEvent[event.supplierEventId]
+                                  ? 'Refresh availability'
+                                  : 'Check ticket availability'}
+                          </button>
+                        </div>
+                      )}
 
                       <a
                         href={
