@@ -44,11 +44,34 @@ type AvailabilityState =
 const PAGE_SIZE = 12;
 
 function formatDate(value?: string): string {
-  if (!value) return 'Date to be confirmed';
+  if (!value) {
+    return 'Date to be confirmed';
+  }
 
-  const date = new Date(value.replace(' ', 'T'));
+  // Preserve the calendar date supplied by XS2Event.
+  // Avoid browser timezone conversions that can shift
+  // a Grand Prix date backwards or forwards.
+  const datePart = value.slice(0, 10);
+  const parts = datePart.split('-').map(Number);
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    parts.length !== 3 ||
+    parts.some(part => !Number.isInteger(part))
+  ) {
+    return value;
+  }
+
+  const [year, month, day] = parts;
+
+  const date = new Date(
+    Date.UTC(year, month - 1, day)
+  );
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return value;
   }
 
