@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, SlidersHorizontal } from 'lucide-react';
 import { events } from '../lib/data';
 import EventCard from './EventCard';
@@ -9,6 +9,7 @@ import EventCard from './EventCard';
 const SUPPLIER_EVENTS_PER_PAGE = 15;
 const AVAILABILITY_STORAGE_KEY = 'grandstand-pass-test-football-availability-v1';
 const AVAILABILITY_TTL_MS = 5 * 60 * 1000;
+const BATCH_CONCURRENCY = 3;
 
 type SavedAvailability = {
   status: 'available' | 'unavailable';
@@ -188,6 +189,8 @@ export default function EventBrowser({
   const [sort, setSort] = useState('date');
   const [supplierPage, setSupplierPage] = useState(1);
   const [availableOffersOnly, setAvailableOffersOnly] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ completed: number; total: number } | null>(null);
+  const batchRunningRef = useRef(false);
   const [availabilityByEvent, setAvailabilityByEvent] = useState<
     Record<string, AvailabilityStatus>
   >({});
@@ -214,28 +217,15 @@ export default function EventBrowser({
     return () => window.clearInterval(interval);
   }, []);
 
-  async function checkAvailability(eventId: string) {
-    if (!eventId || availabilityByEvent[eventId] === 'checking') {
-      return;
-    }
-
-    setAvailabilityByEvent(previous => ({
-      ...previous,
-      [eventId]: 'checking',
-    }));
-
+  async function fetchAvailability(eventId: string): Promise<'available' | 'unavailable' | 'error'> {
     try {
       const response = await fetch(
         `/api/football-test-availability?eventId=${encodeURIComponent(eventId)}`,
         { cache: 'no-store' }
       );
 
-      if (!response.ok) {
-        throw new Error('Availability check failed');
-      }
-
+      if (!response.ok) throw new Error('Availability check failed');
       const result: AvailabilityResponse = await response.json();
-
       if (
         result.testData !== true ||
         result.eventId !== eventId ||
@@ -246,15 +236,53 @@ export default function EventBrowser({
 
       const status = result.hasAvailableTickets ? 'available' : 'unavailable';
       saveAvailability(eventId, status);
-      setAvailabilityByEvent(previous => ({
-        ...previous,
-        [eventId]: status,
-      }));
+      setAvailabilityByEvent(previous => ({ ...previous, [eventId]: status }));
+      return status;
     } catch {
-      setAvailabilityByEvent(previous => ({
-        ...previous,
-        [eventId]: 'error',
-      }));
+      setAvailabilityByEvent(previous => ({ ...previous, [eventId]: 'error' }));
+      return 'error';
+    }
+  }
+
+  async function checkAvailability(eventId: string) {
+    if (!eventId || batchRunningRef.current || availabilityByEvent[eventId] === 'checking') return;
+    setAvailabilityByEvent(previous => ({ ...previous, [eventId]: 'checking' }));
+    await fetchAvailability(eventId);
+  }
+
+  async function checkCurrentPage(eventIds: string[]) {
+    if (batchRunningRef.current || eventIds.length === 0) return;
+    // Fresh results need no new request. Only check unchecked or expired matches.
+    const saved = readSavedAvailability();
+    const toCheck = [...new Set(eventIds)].filter(id => id && !saved[id] && availabilityByEvent[id] !== 'checking');
+    if (toCheck.length === 0) return;
+
+    batchRunningRef.current = true;
+    setBatchProgress({ completed: 0, total: toCheck.length });
+    setAvailabilityByEvent(previous => {
+      const next = { ...previous };
+      for (const id of toCheck) next[id] = 'checking';
+      return next;
+    });
+
+    let nextIndex = 0;
+    let completed = 0;
+    const worker = async () => {
+      while (nextIndex < toCheck.length) {
+        const id = toCheck[nextIndex++];
+        await fetchAvailability(id);
+        completed++;
+        setBatchProgress({ completed, total: toCheck.length });
+      }
+    };
+
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(BATCH_CONCURRENCY, toCheck.length) }, () => worker())
+      );
+    } finally {
+      batchRunningRef.current = false;
+      setBatchProgress(null);
     }
   }
 
@@ -379,6 +407,15 @@ export default function EventBrowser({
     (currentSupplierPage - 1) * SUPPLIER_EVENTS_PER_PAGE,
     currentSupplierPage * SUPPLIER_EVENTS_PER_PAGE
   );
+
+  const currentPageEventIds = visibleSupplierEvents
+    .map(event => event.supplierEventId)
+    .filter((id): id is string => Boolean(id));
+  const uncheckedOnPage = currentPageEventIds.filter(id =>
+    availabilityByEvent[id] !== 'checking' &&
+    availabilityByEvent[id] !== 'available' &&
+    availabilityByEvent[id] !== 'unavailable'
+  ).length;
 
   const supplierPageNumbers = Array.from(
     { length: supplierPageCount },
@@ -523,6 +560,7 @@ export default function EventBrowser({
               type="checkbox"
               className="mt-1 h-4 w-4 accent-blue-600"
               checked={availableOffersOnly}
+              disabled={batchProgress !== null}
               onChange={e => {
                 setAvailableOffersOnly(e.target.checked);
                 setSupplierPage(1);
@@ -575,6 +613,28 @@ export default function EventBrowser({
                   and checkout is disabled.
                 </p>
               </div>
+
+              {!availableOffersOnly && currentPageEventIds.length > 0 && (
+                <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+                  <button
+                    type="button"
+                    disabled={batchProgress !== null || uncheckedOnPage === 0}
+                    onClick={() => void checkCurrentPage(currentPageEventIds)}
+                    className="rounded-lg bg-blue px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {batchProgress
+                      ? `Checking ${batchProgress.completed} of ${batchProgress.total} matches...`
+                      : uncheckedOnPage === 0
+                        ? 'All matches on this page checked'
+                        : `Check availability for this page (${uncheckedOnPage})`}
+                  </button>
+                  <p role="status" aria-live="polite" className="text-xs muted">
+                    {batchProgress
+                      ? 'Checking up to three test matches at a time. Please wait.'
+                      : 'Checks only unchecked matches on this page. Results expire after five minutes; stock is not reserved.'}
+                  </p>
+                </div>
+              )}
 
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {visibleSupplierEvents.map(event => (
@@ -641,7 +701,7 @@ export default function EventBrowser({
                           </p>
                           <button
                             type="button"
-                            disabled={availabilityByEvent[event.supplierEventId] === 'checking'}
+                            disabled={batchProgress !== null || availabilityByEvent[event.supplierEventId] === 'checking'}
                             onClick={() => checkAvailability(event.supplierEventId!)}
                             className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-navy hover:bg-ice disabled:cursor-wait disabled:opacity-50"
                           >
