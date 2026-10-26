@@ -265,7 +265,7 @@ export default function Football() {
               <Search
                 size={19}
                 aria-hidden="true"
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
 
               <input
@@ -276,7 +276,11 @@ export default function Football() {
                 }
                 placeholder="Search for a country..."
                 aria-label="Search football countries"
-                className="field w-full pl-11 pr-10"
+                className="field w-full"
+                style={{
+                  paddingLeft: '2.75rem',
+                  paddingRight: '2.75rem',
+                }}
               />
 
               {countrySearch.length > 0 && (
