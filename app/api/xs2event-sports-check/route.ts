@@ -5,8 +5,6 @@ import { getXS2EventSports } from '../../../lib/xs2event';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Sport = Record<string, unknown>;
-
 export async function GET() {
   try {
     const response: unknown = await getXS2EventSports();
@@ -19,29 +17,35 @@ export async function GET() {
         ? response.sports
         : [];
 
-    const sports = data
-      .filter(
-        (item: unknown): item is Sport =>
-          typeof item === 'object' &&
-          item !== null &&
-          !Array.isArray(item)
-      )
-      .map(item => ({
-        sport_type:
-          typeof item.sport_type === 'string'
-            ? item.sport_type
-            : null,
-        name:
-          typeof item.name === 'string'
-            ? item.name
-            : null,
-      }));
+    const sports = data.map((item: unknown) => {
+      if (
+        !item ||
+        typeof item !== 'object' ||
+        Array.isArray(item)
+      ) {
+        return { fields: [] };
+      }
+
+      const record = item as Record<string, unknown>;
+
+      return {
+        fields: Object.keys(record),
+        values: Object.fromEntries(
+          Object.entries(record).filter(
+            ([, value]) =>
+              typeof value === 'string' ||
+              typeof value === 'number' ||
+              typeof value === 'boolean'
+          )
+        ),
+      };
+    });
 
     return NextResponse.json(
       {
         testData: true,
-        sports,
         total: sports.length,
+        sports,
       },
       {
         headers: {
@@ -51,9 +55,7 @@ export async function GET() {
     );
   } catch {
     return NextResponse.json(
-      {
-        error: 'Unable to retrieve test sports.',
-      },
+      { error: 'Unable to retrieve test sports.' },
       { status: 503 }
     );
   }
