@@ -3,15 +3,30 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, ShoppingCart, Ticket } from 'lucide-react';
+import {
+  CheckCircle2,
+  ShoppingCart,
+  Ticket,
+} from 'lucide-react';
 import { useCart } from './CartProvider';
-import { formatCurrency, isSupportedCurrency } from '../lib/currency';
+import {
+  formatCurrency,
+  isSupportedCurrency,
+} from '../lib/currency';
 
-type DisplayCurrency = 'ZAR' | 'EUR' | 'USD' | 'GBP' | 'AED';
+type DisplayCurrency =
+  | 'ZAR'
+  | 'EUR'
+  | 'USD'
+  | 'GBP'
+  | 'AED';
 
-type CurrencyAmounts = Partial<Record<DisplayCurrency, number>>;
+type CurrencyAmounts = Partial<
+  Record<DisplayCurrency, number>
+>;
 
 type SupplierTestCartButtonProps = {
+  sport?: string;
   ticketId: string;
   eventId: string;
   eventName: string;
@@ -35,6 +50,7 @@ type SupplierTestCartButtonProps = {
 };
 
 export default function SupplierTestCartButton({
+  sport = 'Football',
   ticketId,
   eventId,
   eventName,
@@ -73,14 +89,17 @@ export default function SupplierTestCartButton({
     existingItem &&
     (!validSellingPrice ||
       typeof existingItem.price !== 'number' ||
-      Math.abs(existingItem.price - sellingPrice!) > 0.005 ||
+      Math.abs(
+        existingItem.price - sellingPrice!
+      ) > 0.005 ||
       existingItem.currency !== currency ||
       existingItem.supplier !== 'XS2Event' ||
       existingItem.supplierTicketId !== ticketId ||
       existingItem.supplierEnvironment !== 'test')
   );
 
-  const alreadyInCart = existingItem?.quantity ?? 0;
+  const alreadyInCart =
+    existingItem?.quantity ?? 0;
 
   const validStock =
     Number.isInteger(stock) && stock > 0;
@@ -115,41 +134,55 @@ export default function SupplierTestCartButton({
 
   const selectedQuantity = Math.min(
     Math.max(quantity, minimumQuantity),
-    Math.max(minimumQuantity, remainingQuantity)
+    Math.max(
+      minimumQuantity,
+      remainingQuantity
+    )
   );
 
   // The original selling price remains the source of truth.
-  const originalTotal =
-    validSellingPrice
-      ? Math.round(
-          sellingPrice! * selectedQuantity * 100
-        ) / 100
-      : null;
+  const originalTotal = validSellingPrice
+    ? Math.round(
+        sellingPrice! * selectedQuantity * 100
+      ) / 100
+    : null;
 
   // Currency equivalents are calculated on the server.
-  const convertedUnitPrice = displayPrices?.[displayCurrency];
+  const convertedUnitPrice =
+    displayPrices?.[displayCurrency];
 
   const hasConvertedPrice =
     typeof convertedUnitPrice === 'number' &&
     Number.isFinite(convertedUnitPrice) &&
     convertedUnitPrice > 0;
 
-  const sameCurrency = displayCurrency === currency;
+  const sameCurrency =
+    displayCurrency === currency;
 
   const showConvertedTotal =
     !sameCurrency && hasConvertedPrice;
 
   const convertedTotal = showConvertedTotal
     ? Math.round(
-        convertedUnitPrice! * selectedQuantity * 100
+        convertedUnitPrice! *
+          selectedQuantity *
+          100
       ) / 100
     : null;
 
   const indicativeTotal =
-    showConvertedTotal && convertedTotal !== null
-      ? formatCurrency(convertedTotal, displayCurrency)
-      : originalTotal !== null && isSupportedCurrency(currency)
-        ? formatCurrency(originalTotal, currency)
+    showConvertedTotal &&
+    convertedTotal !== null
+      ? formatCurrency(
+          convertedTotal,
+          displayCurrency
+        )
+      : originalTotal !== null &&
+          isSupportedCurrency(currency)
+        ? formatCurrency(
+            originalTotal,
+            currency
+          )
         : null;
 
   function handleAddToCart() {
@@ -165,7 +198,7 @@ export default function SupplierTestCartButton({
       id: cartItemId,
       eventId,
       eventName,
-      sport: 'Football',
+      sport,
       eventDate,
       category,
       session: 'XS2Event TEST — Not for sale',
@@ -193,7 +226,10 @@ export default function SupplierTestCartButton({
     <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-          <Ticket size={20} aria-hidden="true" />
+          <Ticket
+            size={20}
+            aria-hidden="true"
+          />
         </span>
 
         <div>
@@ -209,12 +245,16 @@ export default function SupplierTestCartButton({
 
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600">
         <span>
-          <strong className="text-navy">In cart:</strong>{' '}
+          <strong className="text-navy">
+            In cart:
+          </strong>{' '}
           {alreadyInCart}
         </span>
 
         <span>
-          <strong className="text-navy">Remaining:</strong>{' '}
+          <strong className="text-navy">
+            Remaining:
+          </strong>{' '}
           {remainingQuantity}
         </span>
       </div>
@@ -222,16 +262,18 @@ export default function SupplierTestCartButton({
       {staleCartItem && (
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p>
-            An older or differently priced version of this test
-            ticket is in your cart. Remove it before adding
-            the current offer.
+            An older or differently priced version
+            of this test ticket is in your cart.
+            Remove it before adding the current offer.
           </p>
 
           <button
             type="button"
             onClick={() => {
               removeItem(cartItemId);
-              setMessage('Older test ticket removed.');
+              setMessage(
+                'Older test ticket removed.'
+              );
             }}
             className="mt-3 rounded-lg border border-amber-700 bg-white px-4 py-2 font-bold text-amber-900 hover:bg-amber-100"
           >
@@ -253,7 +295,9 @@ export default function SupplierTestCartButton({
             id={`quantity-${ticketId}`}
             value={selectedQuantity}
             onChange={event => {
-              setQuantity(Number(event.target.value));
+              setQuantity(
+                Number(event.target.value)
+              );
               setMessage('');
             }}
             className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-navy"
@@ -261,13 +305,21 @@ export default function SupplierTestCartButton({
             {Array.from(
               {
                 length:
-                  remainingQuantity - minimumQuantity + 1,
+                  remainingQuantity -
+                  minimumQuantity +
+                  1,
               },
-              (_, index) => minimumQuantity + index
+              (_, index) =>
+                minimumQuantity + index
             ).map(value => (
-              <option key={value} value={value}>
+              <option
+                key={value}
+                value={value}
+              >
                 {value}{' '}
-                {value === 1 ? 'ticket' : 'tickets'}
+                {value === 1
+                  ? 'ticket'
+                  : 'tickets'}
               </option>
             ))}
           </select>
@@ -296,8 +348,12 @@ export default function SupplierTestCartButton({
               originalTotal !== null &&
               isSupportedCurrency(currency) && (
                 <p className="mt-2 text-xs text-slate-500">
-                  Indicative conversion · Original total:{' '}
-                  {formatCurrency(originalTotal, currency)}
+                  Indicative conversion ·
+                  Original total:{' '}
+                  {formatCurrency(
+                    originalTotal,
+                    currency
+                  )}
                 </p>
               )}
 
@@ -305,8 +361,9 @@ export default function SupplierTestCartButton({
               !hasConvertedPrice &&
               originalTotal !== null && (
                 <p className="mt-2 text-xs text-amber-800">
-                  {displayCurrency} conversion unavailable.
-                  Showing the original selling price.
+                  {displayCurrency} conversion
+                  unavailable. Showing the
+                  original selling price.
                 </p>
               )}
           </div>
@@ -316,7 +373,10 @@ export default function SupplierTestCartButton({
             onClick={handleAddToCart}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-blue px-4 py-4 font-extrabold text-white transition hover:opacity-90"
           >
-            <ShoppingCart size={20} aria-hidden="true" />
+            <ShoppingCart
+              size={20}
+              aria-hidden="true"
+            />
             Add to Test Cart
           </button>
         </>
@@ -334,7 +394,10 @@ export default function SupplierTestCartButton({
           className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800"
         >
           <p className="flex items-center gap-2 font-bold">
-            <CheckCircle2 size={18} aria-hidden="true" />
+            <CheckCircle2
+              size={18}
+              aria-hidden="true"
+            />
             {message}
           </p>
 
@@ -348,12 +411,14 @@ export default function SupplierTestCartButton({
       )}
 
       <p className="mt-4 text-xs leading-relaxed text-slate-500">
-        <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
-        Prices are indicative, availability may change,
-        and no supplier reservation or payment is created.
-        Checkout remains disabled.
+        <strong>
+          TEST DATA — NOT FOR SALE.
+        </strong>{' '}
+        Prices are indicative, availability
+        may change, and no supplier reservation
+        or payment is created. Checkout
+        remains disabled.
       </p>
     </div>
   );
 }
-
