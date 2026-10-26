@@ -286,8 +286,10 @@ export default function EventBrowser({
           />
 
           <input
-            className="field pl-10"
+            className="field w-full"
+            style={{ paddingLeft: '2.75rem' }}
             placeholder="Search events or cities"
+            aria-label="Search events or cities"
             value={query}
             onChange={e => setQuery(e.target.value)}
           />
