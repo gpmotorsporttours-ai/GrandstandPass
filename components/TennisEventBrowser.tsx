@@ -1,0 +1,341 @@
+
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CalendarDays,
+  MapPin,
+  Search,
+  Loader2,
+} from 'lucide-react';
+
+type TennisEvent = {
+  event_id: string;
+  event_name: string;
+  tournament_name?: string;
+  date_start?: string;
+  date_stop?: string;
+  venue_name?: string;
+  city?: string;
+  iso_country?: string;
+  event_status?: string;
+};
+
+type EventsResponse = {
+  testData: boolean;
+  events: TennisEvent[];
+  error?: string;
+};
+
+const PAGE_SIZE = 12;
+
+function formatDate(value?: string): string {
+  if (!value) {
+    return 'Date to be confirmed';
+  }
+
+  // Preserve the calendar date supplied by XS2Event.
+  // Avoid timezone conversions that can shift dates.
+  const parts = value.slice(0, 10).split('-').map(Number);
+
+  if (
+    parts.length !== 3 ||
+    parts.some(part => !Number.isInteger(part))
+  ) {
+    return value;
+  }
+
+  const [year, month, day] = parts;
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+export default function TennisEventBrowser() {
+  const [events, setEvents] = useState<TennisEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const [search, setSearch] = useState('');
+  const [year, setYear] = useState('all');
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadEvents() {
+      try {
+        const response = await fetch(
+          '/api/tennis-test-events',
+          { cache: 'no-store' }
+        );
+
+        if (!response.ok) {
+          throw new Error('Unable to load Tennis events');
+        }
+
+        const data =
+          (await response.json()) as EventsResponse;
+
+        if (!Array.isArray(data.events)) {
+          throw new Error('Invalid Tennis event response');
+        }
+
+        const validEvents = data.events.filter(
+          event =>
+            typeof event.event_id === 'string' &&
+            Boolean(event.event_id) &&
+            typeof event.event_name === 'string' &&
+            Boolean(event.event_name)
+        );
+
+        if (!cancelled) {
+          setEvents(validEvents);
+          setError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setError(
+            'Tennis test events are temporarily unavailable.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadEvents();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const years = useMemo(() => {
+    const values = new Set(
+      events
+        .map(event => event.date_start?.slice(0, 4))
+        .filter((value): value is string =>
+          Boolean(value)
+        )
+    );
+
+    return [...values].sort();
+  }, [events]);
+
+  const filteredEvents = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return events.filter(event => {
+      const matchesSearch =
+        !query ||
+        [
+          event.event_name,
+          event.tournament_name,
+          event.venue_name,
+          event.city,
+          event.iso_country,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+
+      const matchesYear =
+        year === 'all' ||
+        event.date_start?.startsWith(year);
+
+      return matchesSearch && matchesYear;
+    });
+  }, [events, search, year]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredEvents.length / PAGE_SIZE)
+  );
+
+  const visibleEvents = filteredEvents.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE
+  );
+
+  return (
+    <section className="py-10">
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+        <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
+        Tennis events are retrieved from the XS2Event test
+        environment. Ticket selection, reservations and
+        purchases are not enabled. Checkout is disabled.
+      </div>
+
+      <div className="mt-8 flex flex-col gap-4 md:flex-row">
+        <div className="relative flex-1">
+          <Search
+            size={19}
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+
+          <input
+            type="search"
+            value={search}
+            onChange={event => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search tournament, venue or city"
+            className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-navy"
+          />
+        </div>
+
+        <select
+          value={year}
+          onChange={event => {
+            setYear(event.target.value);
+            setPage(1);
+          }}
+          className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-navy"
+          aria-label="Filter Tennis events by year"
+        >
+          <option value="all">All years</option>
+
+          {years.map(value => (
+            <option key={value} value={value}>
+              {value} season
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="mt-10 flex items-center gap-3 text-slate-600">
+          <Loader2
+            size={22}
+            className="animate-spin"
+          />
+          Loading Tennis test events...
+        </div>
+      ) : error ? (
+        <div
+          role="alert"
+          className="mt-8 rounded-xl border bg-white p-6 text-amber-900"
+        >
+          {error}
+        </div>
+      ) : (
+        <>
+          <p className="mt-6 text-sm text-slate-600">
+            Showing {filteredEvents.length} Tennis test events.
+          </p>
+
+          {visibleEvents.length === 0 ? (
+            <div className="mt-8 rounded-xl border bg-white p-8 text-slate-600">
+              No Tennis events match your search.
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {visibleEvents.map(event => (
+                <article
+                  key={event.event_id}
+                  className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wide text-blue">
+                    Tennis
+                  </p>
+
+                  <h2 className="mt-3 text-xl font-black text-navy">
+                    {event.event_name}
+                  </h2>
+
+                  {event.tournament_name &&
+                    event.tournament_name !== event.event_name && (
+                      <p className="mt-2 text-sm text-slate-500">
+                        {event.tournament_name}
+                      </p>
+                    )}
+
+                  <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+                    <CalendarDays size={17} className="shrink-0" />
+                    <span>
+                      {formatDate(event.date_start)}
+                      {event.date_stop &&
+                        ` – ${formatDate(event.date_stop)}`}
+                    </span>
+                  </p>
+
+                  <p className="mt-3 flex items-start gap-2 text-sm text-slate-600">
+                    <MapPin size={17} className="shrink-0" />
+                    <span>
+                      {[
+                        event.venue_name,
+                        event.city,
+                        event.iso_country,
+                      ]
+                        .filter(Boolean)
+                        .join(', ') ||
+                        'Venue to be confirmed'}
+                    </span>
+                  </p>
+
+                  <div className="mt-auto pt-6">
+                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-600">
+                      Test ticket selection coming soon
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="mt-8 flex items-center justify-center gap-4">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() =>
+                  setPage(previous =>
+                    Math.max(1, previous - 1)
+                  )
+                }
+                className="rounded-lg border px-4 py-2 font-bold disabled:opacity-40"
+              >
+                Previous
+              </button>
+
+              <span className="text-sm text-slate-600">
+                Page {page} of {totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() =>
+                  setPage(previous =>
+                    Math.min(totalPages, previous + 1)
+                  )
+                }
+                className="rounded-lg border px-4 py-2 font-bold disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
