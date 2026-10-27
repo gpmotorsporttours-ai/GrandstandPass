@@ -298,7 +298,7 @@ export default function HorseRacingEventBrowser() {
 
                   <div className="mt-auto pt-6">
                     <Link
-                      href={`/horseracing/tickets?eventId=${encodeURIComponent(event.event_id)}`}
+                      href={`/horse-racing/tickets?eventId=${encodeURIComponent(event.event_id)}`}
                       className="block rounded-xl bg-blue px-4 py-3 text-center text-sm font-bold text-white transition hover:opacity-90"
                     >
                       View Test Tickets
