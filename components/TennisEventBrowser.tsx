@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   CalendarDays,
   MapPin,
@@ -179,8 +180,9 @@ export default function TennisEventBrowser() {
       <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
         <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
         Tennis events are retrieved from the XS2Event test
-        environment. Ticket selection, reservations and
-        purchases are not enabled. Checkout is disabled.
+        environment. Test ticket selection is available for
+        development only. No reservations or purchases can
+        be made. Checkout remains disabled.
       </div>
 
       <div className="mt-8 flex flex-col gap-4 md:flex-row">
@@ -292,9 +294,12 @@ export default function TennisEventBrowser() {
                   </p>
 
                   <div className="mt-auto pt-6">
-                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-600">
-                      Test ticket selection coming soon
-                    </p>
+                    <Link
+                      href={`/tennis/tickets?eventId=${encodeURIComponent(event.event_id)}`}
+                      className="block rounded-xl bg-blue px-4 py-3 text-center text-sm font-bold text-white transition hover:opacity-90"
+                    >
+                      View Test Tickets
+                    </Link>
                   </div>
                 </article>
               ))}
