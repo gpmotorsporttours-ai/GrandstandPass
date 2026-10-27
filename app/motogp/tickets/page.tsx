@@ -168,9 +168,11 @@ async function getSellingPrice(
   const netRateMinor = ticket.net_rate;
 
   if (
-    (currency !== 'EUR' && currency !== 'GBP') ||
-    !Number.isSafeInteger(netRateMinor) ||
+    (currency !== 'EUR' &&
+      currency !== 'GBP' &&
+      currency !== 'USD') ||
     typeof netRateMinor !== 'number' ||
+    !Number.isSafeInteger(netRateMinor) ||
     netRateMinor <= 0
   ) {
     return null;
@@ -300,7 +302,7 @@ export default async function MotoGPTicketsPage({
 
         <section className="mt-8 rounded-2xl border bg-white p-8 md:p-12">
           <h1 className="text-2xl md:text-3xl font-black text-navy">
-            Choose a MotoGP MotoGP event first
+            Choose a MotoGP event first
           </h1>
 
           <p className="muted mt-4 max-w-2xl">
