@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import EventBrowser from '../../../components/EventBrowser';
 import Formula1EventBrowser from '../../../components/Formula1EventBrowser';
 import MotoGPEventBrowser from '../../../components/MotoGPEventBrowser';
+import TennisEventBrowser from '../../../components/TennisEventBrowser';
 import { sports, sportSlug } from '../../../lib/data';
 
 const otherSports = [
@@ -32,6 +33,7 @@ export default async function SportPage({
 
   const isFormula1 = sport === 'Formula 1';
   const isMotoGP = sport === 'MotoGP';
+  const isTennis = sport === 'Tennis';
 
   return (
     <>
@@ -50,7 +52,9 @@ export default async function SportPage({
               ? 'Explore upcoming Formula 1 Grand Prix events and discover available XS2Event test ticket offers.'
               : isMotoGP
                 ? 'Explore upcoming MotoGP Grand Prix events and discover available XS2Event test ticket offers.'
-                : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
+                : isTennis
+                  ? 'Explore upcoming Tennis events and tournaments from the XS2Event test environment.'
+                  : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
           </p>
         </div>
       </section>
@@ -60,6 +64,8 @@ export default async function SportPage({
           <Formula1EventBrowser />
         ) : isMotoGP ? (
           <MotoGPEventBrowser />
+        ) : isTennis ? (
+          <TennisEventBrowser />
         ) : (
           <EventBrowser initialSport={sport} />
         )}
