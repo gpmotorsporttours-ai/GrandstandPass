@@ -78,7 +78,7 @@ export default function HorseRacingEventBrowser() {
     async function loadEvents() {
       try {
         const response = await fetch(
-          '/api/horseracing-test-events',
+          '/api/horse-racing-test-events',
           { cache: 'no-store' }
         );
 
