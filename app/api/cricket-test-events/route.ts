@@ -26,16 +26,11 @@ const MAX_PAGES = 5;
 
 export async function GET() {
   try {
-    const today = new Date()
-      .toISOString()
-      .slice(0, 10);
-
     const collected: SupplierEvent[] = [];
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const params = new URLSearchParams({
         sport_type: 'cricket',
-        date_stop: `ge:${today}`,
         sorting: 'date_start:asc',
         page_size: String(PAGE_SIZE),
         page: String(page),
@@ -90,6 +85,7 @@ export async function GET() {
       {
         testData: true,
         sport: 'Cricket',
+        diagnostic: 'Date filter temporarily removed',
         eventsReturned: events.length,
         events,
       },
