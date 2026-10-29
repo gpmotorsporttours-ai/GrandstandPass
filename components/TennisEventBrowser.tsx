@@ -9,6 +9,7 @@ import {
   Search,
   Loader2,
 } from 'lucide-react';
+import AvailabilityMessage from './AvailabilityMessage';
 
 type TennisEvent = {
   event_id: string;
@@ -28,6 +29,19 @@ type EventsResponse = {
   error?: string;
 };
 
+type AvailabilityResponse = {
+  testData?: boolean;
+  hasAvailableTickets?: boolean;
+  availableCategories?: number;
+  error?: string;
+};
+
+type AvailabilityState =
+  | 'checking'
+  | 'available'
+  | 'unavailable'
+  | 'error';
+
 const PAGE_SIZE = 12;
 
 function formatDate(value?: string): string {
@@ -35,8 +49,8 @@ function formatDate(value?: string): string {
     return 'Date to be confirmed';
   }
 
-  // Preserve the calendar date supplied by XS2Event.
-  // Avoid timezone conversions that can shift dates.
+  // Preserve the supplier calendar date without
+  // timezone conversions that might shift the day.
   const parts = value.slice(0, 10).split('-').map(Number);
 
   if (
@@ -73,6 +87,10 @@ export default function TennisEventBrowser() {
   const [search, setSearch] = useState('');
   const [year, setYear] = useState('all');
   const [page, setPage] = useState(1);
+
+  const [availability, setAvailability] = useState<
+    Record<string, AvailabilityState>
+  >({});
 
   useEffect(() => {
     let cancelled = false;
@@ -175,14 +193,53 @@ export default function TennisEventBrowser() {
     page * PAGE_SIZE
   );
 
+  async function checkAvailability(eventId: string) {
+    setAvailability(previous => ({
+      ...previous,
+      [eventId]: 'checking',
+    }));
+
+    try {
+      const response = await fetch(
+        `/api/tennis-test-availability?eventId=${encodeURIComponent(
+          eventId
+        )}`,
+        { cache: 'no-store' }
+      );
+
+      if (!response.ok) {
+        throw new Error('Availability check failed');
+      }
+
+      const data =
+        (await response.json()) as AvailabilityResponse;
+
+      if (typeof data.hasAvailableTickets !== 'boolean') {
+        throw new Error('Invalid availability response');
+      }
+
+      setAvailability(previous => ({
+        ...previous,
+        [eventId]: data.hasAvailableTickets
+          ? 'available'
+          : 'unavailable',
+      }));
+    } catch {
+      setAvailability(previous => ({
+        ...previous,
+        [eventId]: 'error',
+      }));
+    }
+  }
+
   return (
     <section className="py-10">
       <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
         <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
-        Tennis events are retrieved from the XS2Event test
-        environment. Test ticket selection is available for
-        development only. No reservations or purchases can
-        be made. Checkout remains disabled.
+        Grandstand Pass is operating in development mode
+        using test inventory. Ticket selection is for
+        testing only. No reservations or purchases can be
+        made. Checkout remains disabled.
       </div>
 
       <div className="mt-8 flex flex-col gap-4 md:flex-row">
@@ -232,11 +289,11 @@ export default function TennisEventBrowser() {
           Loading Tennis test events...
         </div>
       ) : error ? (
-        <div
-          role="alert"
-          className="mt-8 rounded-xl border bg-white p-6 text-amber-900"
-        >
-          {error}
+        <div className="mt-8">
+          <AvailabilityMessage status="error" />
+          <p className="mt-3 text-center text-sm text-slate-500">
+            {error}
+          </p>
         </div>
       ) : (
         <>
@@ -245,64 +302,127 @@ export default function TennisEventBrowser() {
           </p>
 
           {visibleEvents.length === 0 ? (
-            <div className="mt-8 rounded-xl border bg-white p-8 text-slate-600">
-              No Tennis events match your search.
+            <div className="mt-8">
+              {events.length === 0 ? (
+                <AvailabilityMessage
+                  status="no-events"
+                  sport="Tennis"
+                />
+              ) : (
+                <div className="rounded-xl border bg-white p-8 text-slate-600">
+                  No Tennis events match your search.
+                </div>
+              )}
             </div>
           ) : (
             <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {visibleEvents.map(event => (
-                <article
-                  key={event.event_id}
-                  className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-                >
-                  <p className="text-xs font-bold uppercase tracking-wide text-blue">
-                    Tennis
-                  </p>
+              {visibleEvents.map(event => {
+                const status =
+                  availability[event.event_id];
 
-                  <h2 className="mt-3 text-xl font-black text-navy">
-                    {event.event_name}
-                  </h2>
+                return (
+                  <article
+                    key={event.event_id}
+                    className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+                  >
+                    <p className="text-xs font-bold uppercase tracking-wide text-blue">
+                      Tennis
+                    </p>
 
-                  {event.tournament_name &&
-                    event.tournament_name !== event.event_name && (
-                      <p className="mt-2 text-sm text-slate-500">
-                        {event.tournament_name}
-                      </p>
-                    )}
+                    <h2 className="mt-3 text-xl font-black text-navy">
+                      {event.event_name}
+                    </h2>
 
-                  <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
-                    <CalendarDays size={17} className="shrink-0" />
-                    <span>
-                      {formatDate(event.date_start)}
-                      {event.date_stop &&
-                        ` – ${formatDate(event.date_stop)}`}
-                    </span>
-                  </p>
+                    {event.tournament_name &&
+                      event.tournament_name !== event.event_name && (
+                        <p className="mt-2 text-sm text-slate-500">
+                          {event.tournament_name}
+                        </p>
+                      )}
 
-                  <p className="mt-3 flex items-start gap-2 text-sm text-slate-600">
-                    <MapPin size={17} className="shrink-0" />
-                    <span>
-                      {[
-                        event.venue_name,
-                        event.city,
-                        event.iso_country,
-                      ]
-                        .filter(Boolean)
-                        .join(', ') ||
-                        'Venue to be confirmed'}
-                    </span>
-                  </p>
+                    <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+                      <CalendarDays
+                        size={17}
+                        className="shrink-0"
+                      />
+                      <span>
+                        {formatDate(event.date_start)}
+                        {event.date_stop &&
+                          ` – ${formatDate(event.date_stop)}`}
+                      </span>
+                    </p>
 
-                  <div className="mt-auto pt-6">
-                    <Link
-                      href={`/tennis/tickets?eventId=${encodeURIComponent(event.event_id)}`}
-                      className="block rounded-xl bg-blue px-4 py-3 text-center text-sm font-bold text-white transition hover:opacity-90"
-                    >
-                      View Test Tickets
-                    </Link>
-                  </div>
-                </article>
-              ))}
+                    <p className="mt-3 flex items-start gap-2 text-sm text-slate-600">
+                      <MapPin
+                        size={17}
+                        className="shrink-0"
+                      />
+                      <span>
+                        {[
+                          event.venue_name,
+                          event.city,
+                          event.iso_country,
+                        ]
+                          .filter(Boolean)
+                          .join(', ') ||
+                          'Venue to be confirmed'}
+                      </span>
+                    </p>
+
+                    <div className="mt-auto pt-6">
+                      {status === 'available' && (
+                        <p className="mb-3 text-sm font-bold text-green-700">
+                          Test ticket offers available
+                        </p>
+                      )}
+
+                      {status === 'unavailable' && (
+                        <div className="mb-4">
+                          <AvailabilityMessage
+                            status="no-tickets"
+                            eventName={event.event_name}
+                          />
+                          <p className="mt-2 text-center text-xs text-slate-500">
+                            No offers were found in the checked
+                            test inventory. Additional inventory
+                            may exist.
+                          </p>
+                        </div>
+                      )}
+
+                      {status === 'error' && (
+                        <div className="mb-4">
+                          <AvailabilityMessage status="error" />
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={status === 'checking'}
+                        onClick={() =>
+                          checkAvailability(event.event_id)
+                        }
+                        className="mb-3 w-full rounded-xl border border-blue px-4 py-3 font-bold text-blue transition hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {status === 'checking'
+                          ? 'Checking availability...'
+                          : status === 'error'
+                            ? 'Try checking availability again'
+                            : 'Check ticket availability'}
+                      </button>
+
+                      <Link
+                        href={`/tennis/tickets?eventId=${encodeURIComponent(
+                          event.event_id
+                        )}`}
+                        className="block rounded-xl bg-blue px-4 py-3 text-center text-sm font-bold text-white transition hover:opacity-90"
+                      >
+                        View Test Tickets
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
 
