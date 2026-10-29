@@ -8,6 +8,7 @@ import BasketballEventBrowser from '../../../components/BasketballEventBrowser';
 import GolfEventBrowser from '../../../components/GolfEventBrowser';
 import HorseRacingEventBrowser from '../../../components/HorseRacingEventBrowser';
 import RugbyEventBrowser from '../../../components/RugbyEventBrowser';
+import AvailabilityMessage from '../../../components/AvailabilityMessage';
 import { sports, sportSlug } from '../../../lib/data';
 
 const otherSports = [
@@ -43,6 +44,9 @@ export default async function SportPage({
   const isHorseRacing = sport === 'Horse Racing';
   const isRugby = sport === 'Rugby';
   const isCricket = sport === 'Cricket';
+  const isBoxing = sport === 'Boxing';
+
+  const isUnavailableSport = isCricket || isBoxing;
 
   return (
     <>
@@ -73,7 +77,9 @@ export default async function SportPage({
                           ? 'Explore international Rugby matches, the Six Nations, Nations Championship and the 2027 Rugby World Championship using XS2Event test ticket offers.'
                           : isCricket
                             ? 'Explore Cricket tickets for international matches, tournaments and major competitions around the world.'
-                            : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
+                            : isBoxing
+                              ? 'Explore upcoming Boxing events, championship fights and major international bouts.'
+                              : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
           </p>
         </div>
       </section>
@@ -93,32 +99,28 @@ export default async function SportPage({
           <HorseRacingEventBrowser />
         ) : isRugby ? (
           <RugbyEventBrowser />
-        ) : isCricket ? (
+        ) : isUnavailableSport ? (
           <section className="py-12">
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-              <strong>XS2Event TEST DATA — NOT FOR SALE.</strong>{' '}
-              Cricket inventory is currently unavailable in
-              our supplier test environment. No reservations
-              or purchases can be made.
+              <strong>
+                TEST DATA — NOT FOR SALE.
+              </strong>{' '}
+              Grandstand Pass is currently operating in
+              development mode. Ticket purchases and
+              reservations are disabled.
             </div>
 
-            <div className="mt-8 rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
-              <h2 className="text-2xl font-black text-navy">
-                No Cricket Events Currently Available
-              </h2>
-
-              <p className="mx-auto mt-4 max-w-xl text-slate-600">
-                There are currently no Cricket events
-                available through our XS2Event test
-                integration. Please check back soon for
-                upcoming matches and ticket availability.
-              </p>
-
-              <p className="mt-4 text-sm text-slate-500">
-                Grandstand Pass is currently operating
-                in development mode. Checkout is disabled.
-              </p>
+            <div className="mt-8">
+              <AvailabilityMessage
+                status="no-events"
+                sport={sport}
+              />
             </div>
+
+            <p className="mt-6 text-center text-sm text-slate-500">
+              Ticket availability will be updated as
+              new events become available.
+            </p>
           </section>
         ) : (
           <EventBrowser initialSport={sport} />
