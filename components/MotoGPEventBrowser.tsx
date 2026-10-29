@@ -10,6 +10,7 @@ import {
   Ticket,
   Loader2,
 } from 'lucide-react';
+import AvailabilityMessage from './AvailabilityMessage';
 
 type MotoGPEvent = {
   event_id: string;
@@ -48,9 +49,6 @@ function formatDate(value?: string): string {
     return 'Date to be confirmed';
   }
 
-  // Preserve the calendar date supplied by XS2Event.
-  // Avoid browser timezone conversions that can shift
-  // a Grand Prix date backwards or forwards.
   const datePart = value.slice(0, 10);
   const parts = datePart.split('-').map(Number);
 
@@ -209,6 +207,10 @@ export default function MotoGPEventBrowser() {
       const data =
         (await response.json()) as AvailabilityResponse;
 
+      if (typeof data.hasAvailableTickets !== 'boolean') {
+        throw new Error('Invalid availability response');
+      }
+
       setAvailability(previous => ({
         ...previous,
         [eventId]: data.hasAvailableTickets
@@ -279,11 +281,11 @@ export default function MotoGPEventBrowser() {
           Loading MotoGP test events...
         </div>
       ) : error ? (
-        <div
-          role="alert"
-          className="mt-8 rounded-xl border bg-white p-6 text-amber-900"
-        >
-          {error}
+        <div className="mt-8">
+          <AvailabilityMessage status="error" />
+          <p className="mt-3 text-center text-sm text-slate-500">
+            {error}
+          </p>
         </div>
       ) : (
         <>
@@ -293,8 +295,17 @@ export default function MotoGPEventBrowser() {
           </p>
 
           {visibleEvents.length === 0 ? (
-            <div className="mt-8 rounded-xl border bg-white p-8 text-slate-600">
-              No Grand Prix events match your search.
+            <div className="mt-8">
+              {events.length === 0 ? (
+                <AvailabilityMessage
+                  status="no-events"
+                  sport="MotoGP"
+                />
+              ) : (
+                <div className="rounded-xl border bg-white p-8 text-slate-600">
+                  No Grand Prix events match your search.
+                </div>
+              )}
             </div>
           ) : (
             <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -345,16 +356,25 @@ export default function MotoGPEventBrowser() {
                       )}
 
                       {status === 'unavailable' && (
-                        <p className="mb-3 text-sm font-bold text-amber-800">
-                          No available test offers found
-                          in the first supplier page
-                        </p>
+                        <div className="mb-4">
+                          <AvailabilityMessage
+                            status="no-tickets"
+                            eventName={event.event_name}
+                          />
+                          <p className="mt-2 text-center text-xs text-slate-500">
+                            No offers were found in the checked
+                            test inventory. Additional inventory
+                            may exist.
+                          </p>
+                        </div>
                       )}
 
                       {status === 'error' && (
-                        <p className="mb-3 text-sm text-amber-800">
-                          Availability could not be checked
-                        </p>
+                        <div className="mb-4">
+                          <AvailabilityMessage
+                            status="error"
+                          />
+                        </div>
                       )}
 
                       <button
@@ -367,7 +387,9 @@ export default function MotoGPEventBrowser() {
                       >
                         {status === 'checking'
                           ? 'Checking availability...'
-                          : 'Check ticket availability'}
+                          : status === 'error'
+                            ? 'Try checking availability again'
+                            : 'Check ticket availability'}
                       </button>
 
                       <Link
