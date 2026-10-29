@@ -1,440 +1,115 @@
 
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  CalendarDays,
-  MapPin,
-  Search,
-  Ticket,
-  Loader2,
+  AlertCircle,
+  CalendarX,
+  RefreshCw,
+  TicketX,
 } from 'lucide-react';
-import AvailabilityMessage from './AvailabilityMessage';
 
-type Formula1Event = {
-  event_id: string;
-  event_name: string;
-  date_start?: string;
-  date_stop?: string;
-  venue_name?: string;
-  city?: string;
-  iso_country?: string;
-  event_status?: string;
-};
-
-type EventsResponse = {
-  testData: boolean;
-  events: Formula1Event[];
-  error?: string;
-};
-
-type AvailabilityResponse = {
-  testData?: boolean;
-  hasAvailableTickets?: boolean;
-  availableCategories?: number;
-  error?: string;
-};
-
-type AvailabilityState =
-  | 'checking'
-  | 'available'
-  | 'unavailable'
+export type AvailabilityStatus =
+  | 'no-events'
+  | 'no-tickets'
+  | 'sold-out'
   | 'error';
 
-const PAGE_SIZE = 12;
+export type AvailabilityMessageProps = {
+  status: AvailabilityStatus;
+  sport?: string;
+  eventName?: string;
+  backHref?: string;
+  showRetry?: boolean;
+  onRetry?: () => void;
+};
 
-function formatDate(value?: string): string {
-  if (!value) {
-    return 'Date to be confirmed';
+export default function AvailabilityMessage({
+  status,
+  sport,
+  eventName,
+  backHref,
+  showRetry = false,
+  onRetry,
+}: AvailabilityMessageProps) {
+  let title = '';
+  let description = '';
+
+  if (status === 'no-events') {
+    title = 'No Events Currently Available';
+    description = sport
+      ? `There are currently no upcoming ${sport} events available. Please check back soon for new events and ticket availability.`
+      : 'There are currently no upcoming events available. Please check back soon.';
   }
 
-  const datePart = value.slice(0, 10);
-  const parts = datePart.split('-').map(Number);
-
-  if (
-    parts.length !== 3 ||
-    parts.some(part => !Number.isInteger(part))
-  ) {
-    return value;
+  if (status === 'no-tickets') {
+    title = 'No Tickets Currently Available';
+    description = eventName
+      ? `Tickets for ${eventName} are currently unavailable. Please check back soon for updates.`
+      : 'There are currently no tickets available for this event. Please check back soon.';
   }
 
-  const [year, month, day] = parts;
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    return value;
+  if (status === 'sold-out') {
+    title = 'Tickets Currently Sold Out';
+    description = eventName
+      ? `There are currently no tickets available for ${eventName}. Please check back soon in case additional tickets become available.`
+      : 'Tickets are currently sold out. Please check back soon.';
   }
 
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(date);
-}
-
-export default function Formula1EventBrowser() {
-  const [events, setEvents] = useState<Formula1Event[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const [search, setSearch] = useState('');
-  const [year, setYear] = useState('all');
-  const [page, setPage] = useState(1);
-
-  const [availability, setAvailability] = useState<
-    Record<string, AvailabilityState>
-  >({});
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadEvents() {
-      try {
-        const response = await fetch(
-          '/api/formula1-test-events',
-          { cache: 'no-store' }
-        );
-
-        if (!response.ok) {
-          throw new Error('Unable to load events');
-        }
-
-        const data =
-          (await response.json()) as EventsResponse;
-
-        if (!Array.isArray(data.events)) {
-          throw new Error('Invalid event response');
-        }
-
-        if (!cancelled) {
-          setEvents(data.events);
-          setError('');
-        }
-      } catch {
-        if (!cancelled) {
-          setError(
-            'Formula 1 events are temporarily unavailable.'
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadEvents();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const years = useMemo(() => {
-    const values = new Set(
-      events
-        .map(event => event.date_start?.slice(0, 4))
-        .filter((value): value is string =>
-          Boolean(value)
-        )
-    );
-
-    return [...values].sort();
-  }, [events]);
-
-  const filteredEvents = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return events.filter(event => {
-      const matchesSearch =
-        !query ||
-        [
-          event.event_name,
-          event.venue_name,
-          event.city,
-          event.iso_country,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(query);
-
-      const matchesYear =
-        year === 'all' ||
-        event.date_start?.startsWith(year);
-
-      return matchesSearch && matchesYear;
-    });
-  }, [events, search, year]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredEvents.length / PAGE_SIZE)
-  );
-
-  const visibleEvents = filteredEvents.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE
-  );
-
-  async function checkAvailability(eventId: string) {
-    setAvailability(previous => ({
-      ...previous,
-      [eventId]: 'checking',
-    }));
-
-    try {
-      const response = await fetch(
-        `/api/formula1-test-availability?eventId=${encodeURIComponent(
-          eventId
-        )}`,
-        { cache: 'no-store' }
-      );
-
-      if (!response.ok) {
-        throw new Error('Availability check failed');
-      }
-
-      const data =
-        (await response.json()) as AvailabilityResponse;
-
-      if (typeof data.hasAvailableTickets !== 'boolean') {
-        throw new Error('Invalid availability response');
-      }
-
-      setAvailability(previous => ({
-        ...previous,
-        [eventId]: data.hasAvailableTickets
-          ? 'available'
-          : 'unavailable',
-      }));
-    } catch {
-      setAvailability(previous => ({
-        ...previous,
-        [eventId]: 'error',
-      }));
-    }
+  if (status === 'error') {
+    title = 'Availability Temporarily Unavailable';
+    description =
+      'We could not check ticket availability right now. Please try again shortly.';
   }
+
+  const Icon =
+    status === 'no-events'
+      ? CalendarX
+      : status === 'error'
+        ? AlertCircle
+        : TicketX;
 
   return (
-    <section className="py-10">
-      <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
-        Grandstand Pass is currently operating in
-        development mode. No tickets can be reserved
-        or purchased. Checkout is disabled.
+    <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50">
+        <Icon
+          className="h-8 w-8 text-blue-600"
+          aria-hidden="true"
+        />
       </div>
 
-      <div className="mt-8 flex flex-col gap-4 md:flex-row">
-        <div className="relative flex-1">
-          <Search
-            size={19}
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-          />
+      <h2 className="mt-6 text-2xl font-black text-slate-900">
+        {title}
+      </h2>
 
-          <input
-            type="search"
-            value={search}
-            onChange={event => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            placeholder="Search Grand Prix, circuit or city"
-            className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-navy"
-          />
-        </div>
+      <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-slate-600">
+        {description}
+      </p>
 
-        <select
-          value={year}
-          onChange={event => {
-            setYear(event.target.value);
-            setPage(1);
-          }}
-          className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-navy"
-          aria-label="Filter Formula 1 events by year"
-        >
-          <option value="all">All years</option>
-
-          {years.map(value => (
-            <option key={value} value={value}>
-              {value} season
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {loading ? (
-        <div className="mt-10 flex items-center gap-3 text-slate-600">
-          <Loader2
-            size={22}
-            className="animate-spin"
-          />
-          Loading Formula 1 events...
-        </div>
-      ) : error ? (
-        <div className="mt-8">
-          <AvailabilityMessage status="error" />
-        </div>
-      ) : (
-        <>
-          <p className="mt-6 text-sm text-slate-600">
-            Showing {filteredEvents.length} upcoming
-            Formula 1 test events.
-          </p>
-
-          {visibleEvents.length === 0 ? (
-            <div className="mt-8">
-              {events.length === 0 ? (
-                <AvailabilityMessage
-                  status="no-events"
-                  sport="Formula 1"
-                />
-              ) : (
-                <div className="rounded-xl border bg-white p-8 text-slate-600">
-                  No Grand Prix events match your search.
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {visibleEvents.map(event => {
-                const status =
-                  availability[event.event_id];
-
-                return (
-                  <article
-                    key={event.event_id}
-                    className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-                  >
-                    <p className="text-xs font-bold uppercase tracking-wide text-blue">
-                      Formula 1
-                    </p>
-
-                    <h2 className="mt-3 text-xl font-black text-navy">
-                      {event.event_name}
-                    </h2>
-
-                    <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
-                      <CalendarDays size={17} />
-                      {formatDate(event.date_start)}
-                      {event.date_stop &&
-                        ` – ${formatDate(event.date_stop)}`}
-                    </p>
-
-                    <p className="mt-3 flex items-start gap-2 text-sm text-slate-600">
-                      <MapPin
-                        size={17}
-                        className="shrink-0"
-                      />
-                      {[
-                        event.venue_name,
-                        event.city,
-                        event.iso_country,
-                      ]
-                        .filter(Boolean)
-                        .join(', ') ||
-                        'Circuit to be confirmed'}
-                    </p>
-
-                    <div className="mt-auto pt-6">
-                      {status === 'available' && (
-                        <p className="mb-3 text-sm font-bold text-green-700">
-                          Test ticket offers available
-                        </p>
-                      )}
-
-                      {status === 'unavailable' && (
-                        <div className="mb-4">
-                          <p className="text-sm font-bold text-amber-800">
-                            No available offers found in the
-                            first supplier page.
-                          </p>
-                          <p className="mt-1 text-xs text-slate-600">
-                            Additional offers may exist.
-                            This does not confirm that the
-                            event is sold out.
-                          </p>
-                        </div>
-                      )}
-
-                      {status === 'error' && (
-                        <div className="mb-4">
-                          <AvailabilityMessage
-                            status="error"
-                          />
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        disabled={status === 'checking'}
-                        onClick={() =>
-                          checkAvailability(event.event_id)
-                        }
-                        className="mb-3 w-full rounded-xl border border-blue px-4 py-3 font-bold text-blue hover:bg-blue-50 disabled:opacity-50"
-                      >
-                        {status === 'checking'
-                          ? 'Checking availability...'
-                          : 'Check ticket availability'}
-                      </button>
-
-                      <Link
-                        href={`/formula1/tickets?eventId=${encodeURIComponent(
-                          event.event_id
-                        )}`}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue px-4 py-3 font-bold text-white hover:opacity-90"
-                      >
-                        <Ticket size={18} />
-                        View test tickets
-                      </Link>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+      {(backHref || (showRetry && onRetry)) && (
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          {backHref && (
+            <Link
+              href={backHref}
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700"
+            >
+              Back to Events
+            </Link>
           )}
 
-          {totalPages > 1 && (
-            <div className="mt-8 flex items-center justify-center gap-4">
-              <button
-                type="button"
-                disabled={page <= 1}
-                onClick={() =>
-                  setPage(previous =>
-                    Math.max(1, previous - 1)
-                  )
-                }
-                className="rounded-lg border px-4 py-2 font-bold disabled:opacity-40"
-              >
-                Previous
-              </button>
-
-              <span className="text-sm text-slate-600">
-                Page {page} of {totalPages}
-              </span>
-
-              <button
-                type="button"
-                disabled={page >= totalPages}
-                onClick={() =>
-                  setPage(previous =>
-                    Math.min(totalPages, previous + 1)
-                  )
-                }
-                className="rounded-lg border px-4 py-2 font-bold disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
+          {showRetry && onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-6 py-3 font-bold text-slate-900 transition hover:bg-slate-50"
+            >
+              <RefreshCw
+                className="h-4 w-4"
+                aria-hidden="true"
+              />
+              Try Again
+            </button>
           )}
-        </>
+        </div>
       )}
-    </section>
+    </div>
   );
 }
