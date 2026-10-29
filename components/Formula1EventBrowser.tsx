@@ -10,6 +10,7 @@ import {
   Ticket,
   Loader2,
 } from 'lucide-react';
+import AvailabilityMessage from './AvailabilityMessage';
 
 type Formula1Event = {
   event_id: string;
@@ -48,9 +49,8 @@ function formatDate(value?: string): string {
     return 'Date to be confirmed';
   }
 
-  // Preserve the calendar date supplied by XS2Event.
-  // Avoid browser timezone conversions that can shift
-  // a Grand Prix date backwards or forwards.
+  // Preserve the event's original calendar date.
+  // UTC formatting avoids browser timezone shifts.
   const datePart = value.slice(0, 10);
   const parts = datePart.split('-').map(Number);
 
@@ -209,6 +209,10 @@ export default function Formula1EventBrowser() {
       const data =
         (await response.json()) as AvailabilityResponse;
 
+      if (typeof data.hasAvailableTickets !== 'boolean') {
+        throw new Error('Invalid availability response');
+      }
+
       setAvailability(previous => ({
         ...previous,
         [eventId]: data.hasAvailableTickets
@@ -227,9 +231,10 @@ export default function Formula1EventBrowser() {
     <section className="py-10">
       <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
         <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
-        Formula 1 inventory is retrieved from the
-        XS2Event test environment. No tickets can be
-        reserved or purchased. Checkout is disabled.
+        Formula 1 ticket information is currently provided
+        through our development test environment.
+        No tickets can be reserved or purchased.
+        Checkout is disabled.
       </div>
 
       <div className="mt-8 flex flex-col gap-4 md:flex-row">
@@ -279,11 +284,8 @@ export default function Formula1EventBrowser() {
           Loading Formula 1 test events...
         </div>
       ) : error ? (
-        <div
-          role="alert"
-          className="mt-8 rounded-xl border bg-white p-6 text-amber-900"
-        >
-          {error}
+        <div className="mt-8">
+          <AvailabilityMessage status="error" />
         </div>
       ) : (
         <>
@@ -292,9 +294,17 @@ export default function Formula1EventBrowser() {
             Formula 1 test events.
           </p>
 
-          {visibleEvents.length === 0 ? (
-            <div className="mt-8 rounded-xl border bg-white p-8 text-slate-600">
-              No Grand Prix events match your search.
+          {events.length === 0 ? (
+            <div className="mt-8">
+              <AvailabilityMessage
+                status="no-events"
+                sport="Formula 1"
+              />
+            </div>
+          ) : visibleEvents.length === 0 ? (
+            <div className="mt-8 rounded-xl border border-slate-200 bg-white p-8 text-slate-600">
+              No Grand Prix events match your search
+              or selected year.
             </div>
           ) : (
             <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -345,16 +355,29 @@ export default function Formula1EventBrowser() {
                       )}
 
                       {status === 'unavailable' && (
-                        <p className="mb-3 text-sm font-bold text-amber-800">
-                          No available test offers found
-                          in the first supplier page
-                        </p>
+                        <div className="mb-4">
+                          <AvailabilityMessage
+                            status="no-tickets"
+                            eventName={event.event_name}
+                          />
+                          <p className="mt-2 text-center text-xs text-slate-500">
+                            No offers were found in the
+                            checked test inventory.
+                            Additional inventory may exist.
+                          </p>
+                        </div>
                       )}
 
                       {status === 'error' && (
-                        <p className="mb-3 text-sm text-amber-800">
-                          Availability could not be checked
-                        </p>
+                        <div className="mb-4">
+                          <AvailabilityMessage
+                            status="error"
+                            showRetry
+                            onRetry={() =>
+                              checkAvailability(event.event_id)
+                            }
+                          />
+                        </div>
                       )}
 
                       <button
