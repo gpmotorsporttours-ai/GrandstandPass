@@ -65,7 +65,7 @@ export default function Footer() {
               className="inline-flex items-center"
             >
               <Image
-                src="/grandstandpass-logo-footer.png"
+                src="/grandstandpass-logo-footer-white.png"
                 alt="Grandstand Pass"
                 width={1800}
                 height={520}
