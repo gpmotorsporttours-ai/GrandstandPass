@@ -1,106 +1,3 @@
-
-Loading older messages…
-
-
-
-
-
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-22
-23
-24
-25
-26
-27
-28
-29
-30
-31
-32
-33
-34
-35
-36
-37
-38
-39
-40
-41
-42
-43
-44
-45
-46
-47
-48
-49
-50
-51
-52
-53
-54
-55
-56
-57
-58
-59
-60
-61
-62
-63
-64
-65
-66
-67
-68
-69
-70
-71
-72
-73
-74
-75
-76
-77
-78
-79
-80
-81
-82
-83
-84
-85
-86
-87
-88
-89
-90
-91
-92
-93
-94
-95
-96
 import Link from 'next/link';
 import { CalendarDays, MapPin, Ticket } from 'lucide-react';
 import { xs2eventGet } from '../../../lib/xs2event';
@@ -197,3 +94,441 @@ async function getDisplayPrices(
           typeof amount === 'number' &&
           Number.isFinite(amount) &&
           amount > 0
+        ) {
+          return [targetCurrency, amount] as const;
+        }
+      } catch {
+        // Keep supplier-currency pricing if conversion fails.
+      }
+
+      return [targetCurrency, null] as const;
+    })
+  );
+
+  const prices: CurrencyAmounts = {};
+
+  for (const [targetCurrency, amount] of results) {
+    if (amount !== null) {
+      prices[targetCurrency] = amount;
+    }
+  }
+
+  return prices;
+}
+
+function formatEventDate(value?: string): string {
+  if (!value) return 'Date to be confirmed';
+
+  const date = new Date(value.replace(' ', 'T'));
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+async function getSellingPrice(
+  ticket: SupplierTicket
+): Promise<number | null> {
+  const currency = ticket.currency_code;
+  const netRateMinor = ticket.net_rate;
+
+  if (
+    (currency !== 'EUR' &&
+      currency !== 'GBP' &&
+      currency !== 'USD') ||
+    typeof netRateMinor !== 'number' ||
+    !Number.isSafeInteger(netRateMinor) ||
+    netRateMinor <= 0
+  ) {
+    return null;
+  }
+
+  try {
+    let eurToSupplierRate: number | undefined;
+
+    if (currency !== 'EUR') {
+      const conversion = await getTicketDisplayPrice(
+        { amount: 1, currency: 'EUR' },
+        currency
+      );
+
+      if (
+        !conversion ||
+        !Number.isFinite(conversion.displayAmount) ||
+        conversion.displayAmount <= 0
+      ) {
+        return null;
+      }
+
+      eurToSupplierRate = conversion.displayAmount;
+    }
+
+    const breakdown = calculateSupplierTicketPrice({
+      netRateMinor,
+      supplierCurrency: currency,
+      eurToSupplierRate,
+    });
+
+    return breakdown
+      ? Math.round(
+          (breakdown.indicativeSellingPrice + Number.EPSILON) * 100
+        ) / 100
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function findSupplierEvent(
+  eventId: string
+): Promise<SupplierEvent | undefined> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (let page = 1; page <= MAX_EVENT_PAGES; page++) {
+    const eventQuery = new URLSearchParams({
+      date_stop: `ge:${today}`,
+      sorting: 'date_start:asc',
+      page_size: String(EVENT_PAGE_SIZE),
+      page: String(page),
+    });
+
+    const response = await xs2eventGet<EventsResponse>(
+      `/events?${eventQuery.toString()}`
+    );
+
+    const pageEvents = Array.isArray(response.events)
+      ? response.events
+      : [];
+
+    const matchingEvent = pageEvents.find(
+      event =>
+        event.event_id === eventId &&
+        event.event_status === 'notstarted' &&
+        /\b(nfl|super bowl|american football)\b/i.test(
+          `${event.tournament_name || ''} ${event.event_name || ''}`
+        )
+    );
+
+    if (matchingEvent) return matchingEvent;
+
+    if (pageEvents.length < EVENT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return undefined;
+}
+
+export default async function NFLTicketsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    eventId?: string | string[];
+  }>;
+}) {
+  const params = await searchParams;
+
+  const eventId =
+    typeof params.eventId === 'string'
+      ? params.eventId
+      : '';
+
+  if (
+    !eventId ||
+    eventId.length > 150 ||
+    !/^[a-zA-Z0-9_-]+$/.test(eventId)
+  ) {
+    return (
+      <main className="container-wide py-10 md:py-14">
+        <Link
+          href="/sport/nfl"
+          className="text-blue font-bold hover:underline"
+        >
+          ← Back to NFL
+        </Link>
+
+        <section className="mt-8 rounded-2xl border bg-white p-8 md:p-12">
+          <h1 className="text-2xl md:text-3xl font-black text-navy">
+            Choose an NFL event first
+          </h1>
+
+          <p className="muted mt-4 max-w-2xl">
+            Select an NFL event to view available XS2Event
+            test ticket offers, indicative Grandstand Pass prices
+            and reported availability.
+          </p>
+
+          <p className="muted mt-6 text-xs">
+            TEST DATA — NOT FOR SALE. No reservations or payments
+            can be made. Checkout remains disabled.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  let event: SupplierEvent | undefined;
+  let tickets: PricedTicket[] = [];
+  let loadError = false;
+
+  try {
+    event = await findSupplierEvent(eventId);
+
+    if (event) {
+      const ticketQuery = new URLSearchParams({
+        event_id: eventId,
+        ticket_status: 'available',
+        stock: 'gt:0',
+        page_size: String(TICKET_PAGE_SIZE),
+        page: '1',
+      });
+
+      const response = await xs2eventGet<TicketsResponse>(
+        `/tickets?${ticketQuery.toString()}`
+      );
+
+      const available = (
+        Array.isArray(response.tickets) ? response.tickets : []
+      ).filter(ticket =>
+        ticket.ticket_status === 'available' &&
+        typeof ticket.stock === 'number' &&
+        Number.isInteger(ticket.stock) &&
+        ticket.stock > 0 &&
+        (!ticket.event_id || ticket.event_id === eventId)
+      );
+
+      tickets = await Promise.all(
+        available.map(async ticket => {
+          const sellingPrice = await getSellingPrice(ticket);
+
+          return {
+            ticket,
+            sellingPrice,
+            displayPrices: await getDisplayPrices(
+              sellingPrice,
+              ticket.currency_code
+            ),
+          };
+        })
+      );
+    }
+  } catch (error) {
+    console.error(
+      'NFL ticket page failed to load:',
+      error instanceof Error ? error.name : 'Unknown error'
+    );
+
+    loadError = true;
+  }
+
+  return (
+    <main className="container-wide py-10 md:py-14">
+      <Link
+        href="/sport/nfl"
+        className="text-blue font-bold hover:underline"
+      >
+        ← Back to NFL
+      </Link>
+
+      <div className="mt-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+        <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
+        Ticket offers are for development only. No reservation
+        or payment can be made. Checkout remains disabled.
+      </div>
+
+      {loadError ? (
+        <div
+          role="alert"
+          className="mt-8 rounded-2xl border bg-white p-8"
+        >
+          NFL ticket information is temporarily
+          unavailable. Please try again later.
+        </div>
+      ) : !event ? (
+        <div className="mt-8 rounded-2xl border bg-white p-8">
+          <h1 className="text-2xl font-black text-navy">
+            NFL event unavailable
+          </h1>
+
+          <p className="muted mt-3">
+            This NFL event is not currently available
+            in the XS2Event NFL test feed.
+            Test inventory can change or expire.
+          </p>
+        </div>
+      ) : (
+        <>
+          <header className="mt-8 rounded-2xl bg-ice p-6 md:p-10">
+            <p className="text-sm font-bold uppercase tracking-wide text-blue">
+              {event.tournament_name || 'NFL'}
+            </p>
+
+            <h1 className="mt-3 text-3xl md:text-5xl font-black text-navy">
+              {event.event_name || 'NFL event'}
+            </h1>
+
+            <div className="mt-6 flex flex-col gap-3 text-sm md:text-base text-navy">
+              <p className="flex items-center gap-2">
+                <CalendarDays size={19} className="text-blue" />
+                {formatEventDate(event.date_start)}
+              </p>
+
+              <p className="flex items-center gap-2">
+                <MapPin size={19} className="text-blue" />
+                {[
+                  event.venue_name,
+                  event.city,
+                  event.iso_country,
+                ].filter(Boolean).join(', ') || 'Venue to be confirmed'}
+              </p>
+            </div>
+          </header>
+
+          <section className="mt-10">
+            <div className="flex items-center gap-3">
+              <Ticket size={26} className="text-blue" />
+
+              <h2 className="text-2xl md:text-3xl font-black text-navy">
+                Choose your NFL tickets
+              </h2>
+            </div>
+
+            <p className="muted mt-3">
+              Browse available supplier test offers and add
+              selections to your development cart. Only the
+              first {TICKET_PAGE_SIZE} supplier offers are
+              checked on this page.
+            </p>
+
+            {tickets.length === 0 ? (
+              <div className="mt-6 rounded-2xl border bg-white p-6 muted">
+                No available test ticket offers were returned
+                for this NFL event.
+              </div>
+            ) : (
+              <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                {tickets.map(
+                  ({ ticket, sellingPrice, displayPrices }, index) => {
+                    const currency = ticket.currency_code;
+                    const validCurrency = isSupportedCurrency(currency);
+
+                    const validNet =
+                      typeof ticket.net_rate === 'number' &&
+                      Number.isSafeInteger(ticket.net_rate) &&
+                      ticket.net_rate > 0;
+
+                    const canAdd = Boolean(
+                      ticket.ticket_id &&
+                      validNet &&
+                      validCurrency &&
+                      sellingPrice !== null
+                    );
+
+                    return (
+                      <article
+                        key={ticket.ticket_id || index}
+                        className="rounded-2xl border bg-white p-6 shadow-sm"
+                      >
+                        <h3 className="text-xl font-black text-navy">
+                          {ticket.ticket_title ||
+                            ticket.category_name ||
+                            'NFL ticket category'}
+                        </h3>
+
+                        <p className="muted text-sm mt-3">
+                          Reported availability:{' '}
+                          {ticket.stock ?? 'Unknown'} tickets
+                          {' · '}
+                          Minimum order: {ticket.min_order ?? 1}
+                        </p>
+
+                        {ticket.options?.numbered_seat && (
+                          <p className="muted text-sm mt-2">
+                            Numbered seating reported
+                          </p>
+                        )}
+
+                        {ticket.options?.covered_seat && (
+                          <p className="muted text-sm mt-2">
+                            Covered seating reported
+                          </p>
+                        )}
+
+                        {ticket.options?.pairs_only && (
+                          <p className="muted text-sm mt-2">
+                            Tickets may require purchase in pairs
+                          </p>
+                        )}
+
+                        <div className="mt-5 rounded-xl bg-ice p-4">
+                          <p className="text-xs font-bold uppercase tracking-wide text-blue">
+                            Indicative Grandstand Pass price
+                          </p>
+
+                          {sellingPrice !== null && validCurrency ? (
+                            <FootballDisplayPrice
+                              sellingPrice={sellingPrice}
+                              currency={currency}
+                              displayPrices={displayPrices}
+                            />
+                          ) : (
+                            <p className="mt-1 text-2xl font-black text-navy">
+                              Price unavailable
+                            </p>
+                          )}
+                        </div>
+
+                        {canAdd ? (
+                          <SupplierTestCartButton
+                            sport="NFL"
+                            ticketId={ticket.ticket_id!}
+                            eventId={eventId}
+                            eventName={
+                              event.event_name || 'NFL event'
+                            }
+                            eventDate={formatEventDate(event.date_start)}
+                            category={
+                              ticket.ticket_title ||
+                              ticket.category_name ||
+                              'NFL ticket category'
+                            }
+                            categoryId={ticket.category_id}
+                            stock={ticket.stock!}
+                            minOrder={ticket.min_order ?? 1}
+                            sellingPrice={sellingPrice}
+                            displayPrices={displayPrices}
+                            currency={currency!}
+                          />
+                        ) : (
+                          <p className="mt-4 text-sm text-amber-800">
+                            This test offer cannot be added to
+                            the cart because pricing or supplier
+                            details are unavailable.
+                          </p>
+                        )}
+                      </article>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </section>
+
+          <p className="muted mt-8 text-xs">
+            Indicative prices include a €5 handling allowance
+            per ticket and 15% markup. Taxes, payment charges
+            and other costs are not yet confirmed.
+            Supplier availability may change.
+          </p>
+        </>
+      )}
+    </main>
+  );
+}
