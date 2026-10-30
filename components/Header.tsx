@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Search,
   Menu,
@@ -38,50 +39,20 @@ const currencies: {
   { code: 'AED', label: '🇦🇪 AED' },
 ];
 
-// Original Grandstand Pass ticket mark.
-// Custom SVG with subtle GP initials.
+// Approved Grandstand Pass logo.
+// Uses the original PNG uploaded to /public.
+// Preserves the stylised GP lettering and ticket design.
 function GrandstandPassLogo() {
   return (
-    <span
-      className="flex items-center gap-2 shrink-0"
-      aria-label="Grandstand Pass"
-    >
-      <span className="flex items-center justify-center w-11 h-11 md:w-12 md:h-12 rounded-xl bg-[#1463E6] shrink-0">
-        <svg
-          viewBox="0 0 64 64"
-          width="36"
-          height="36"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          aria-hidden="true"
-        >
-          <path
-            d="M10 16H54V25C49.5 25 46 28.5 46 32S49.5 39 54 39V48H10V39C14.5 39 18 35.5 18 32S14.5 25 10 25V16Z"
-            stroke="white"
-            strokeWidth="4.5"
-            strokeLinejoin="round"
-          />
-          <text
-            x="32"
-            y="36.5"
-            textAnchor="middle"
-            fill="white"
-            fontSize="15"
-            fontWeight="800"
-            fontFamily="Arial, Helvetica, sans-serif"
-            fontStyle="italic"
-            letterSpacing="-1"
-          >
-            GP
-          </text>
-        </svg>
-      </span>
-
-      <span className="font-black tracking-tight text-xl md:text-2xl text-[#0B2145] whitespace-nowrap">
-        Grandstand
-        <span className="text-[#1463E6]">Pass</span>
-      </span>
-    </span>
+    <Image
+      src="/GrandstandPass%20Ticket%20Logo.png"
+      alt="Grandstand Pass"
+      width={1800}
+      height={520}
+      className="block w-[180px] md:w-[230px] h-auto"
+      priority
+      unoptimized
+    />
   );
 }
 
