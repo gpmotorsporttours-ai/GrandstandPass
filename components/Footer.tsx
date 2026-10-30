@@ -1,5 +1,11 @@
+
 import Link from 'next/link';
-import { Ticket, ShieldCheck, Globe2, Headphones } from 'lucide-react';
+import Image from 'next/image';
+import {
+  ShieldCheck,
+  Globe2,
+  Headphones,
+} from 'lucide-react';
 
 export default function Footer() {
   return (
@@ -11,7 +17,9 @@ export default function Footer() {
               <ShieldCheck />
             </div>
             <div>
-              <h3 className="font-bold">Secure checkout planned</h3>
+              <h3 className="font-bold">
+                Secure checkout planned
+              </h3>
               <p className="text-sm muted mt-1">
                 Payments will be enabled only after integration and testing.
               </p>
@@ -23,7 +31,9 @@ export default function Footer() {
               <Globe2 />
             </div>
             <div>
-              <h3 className="font-bold">Events around the world</h3>
+              <h3 className="font-bold">
+                Events around the world
+              </h3>
               <p className="text-sm muted mt-1">
                 Football, motorsport, tennis and more in one place.
               </p>
@@ -35,7 +45,9 @@ export default function Footer() {
               <Headphones />
             </div>
             <div>
-              <h3 className="font-bold">Customer-first experience</h3>
+              <h3 className="font-bold">
+                Customer-first experience
+              </h3>
               <p className="text-sm muted mt-1">
                 Clear ticket information and a straightforward booking journey.
               </p>
@@ -47,22 +59,43 @@ export default function Footer() {
       <footer className="bg-navy text-white py-12">
         <div className="container-wide flex flex-col md:flex-row justify-between gap-8">
           <div>
-            <div className="flex items-center gap-2 text-xl font-black">
-              <Ticket />
-              Grandstand<span className="text-blue">Pass</span>
-            </div>
+            <Link
+              href="/"
+              aria-label="Grandstand Pass homepage"
+              className="inline-flex items-center bg-white rounded-xl px-3 py-2"
+            >
+              <Image
+                src="/GrandstandPass%20Ticket%20Logo.png"
+                alt="Grandstand Pass"
+                width={1800}
+                height={520}
+                className="block w-[210px] md:w-[250px] h-auto"
+                unoptimized
+              />
+            </Link>
+
             <p className="text-slate-300 text-sm mt-3 max-w-sm">
               Your front-row pass to unforgettable sporting moments.
             </p>
           </div>
 
           <div className="text-sm text-slate-300">
-            <p className="font-bold text-white mb-3">Explore</p>
+            <p className="font-bold text-white mb-3">
+              Explore
+            </p>
             <div className="grid gap-2">
-              <Link href="/football">Football</Link>
-              <Link href="/sport/formula-1">Formula 1</Link>
-              <Link href="/sport/motogp">MotoGP</Link>
-              <Link href="/sport/tennis">Tennis</Link>
+              <Link href="/football">
+                Football
+              </Link>
+              <Link href="/sport/formula-1">
+                Formula 1
+              </Link>
+              <Link href="/sport/motogp">
+                MotoGP
+              </Link>
+              <Link href="/sport/tennis">
+                Tennis
+              </Link>
             </div>
           </div>
         </div>
