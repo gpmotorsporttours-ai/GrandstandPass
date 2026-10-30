@@ -32,7 +32,6 @@ export async function GET() {
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const params = new URLSearchParams({
-        sport_type: 'american_football',
         date_stop: `ge:${today}`,
         sorting: 'date_start:asc',
         page_size: String(PAGE_SIZE),
@@ -88,6 +87,7 @@ export async function GET() {
       {
         testData: true,
         sport: 'NFL',
+        diagnosticMode: true,
         eventsReturned: events.length,
         events,
       },
@@ -102,6 +102,7 @@ export async function GET() {
       {
         testData: true,
         sport: 'NFL',
+        diagnosticMode: true,
         error: 'NFL test events could not be loaded',
       },
       {
