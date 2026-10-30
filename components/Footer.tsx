@@ -62,10 +62,10 @@ export default function Footer() {
             <Link
               href="/"
               aria-label="Grandstand Pass homepage"
-              className="inline-flex items-center bg-white rounded-xl px-3 py-2"
+              className="inline-flex items-center"
             >
               <Image
-                src="/GrandstandPass%20Ticket%20Logo.png"
+                src="/grandstandpass-logo-footer.png"
                 alt="Grandstand Pass"
                 width={1800}
                 height={520}
