@@ -22,7 +22,7 @@ type EventsResponse = {
 };
 
 const PAGE_SIZE = 50;
-const MAX_PAGES = 20;
+const MAX_PAGES = 60;
 
 const NFL_TERMS = [
   'nfl',
@@ -71,19 +71,21 @@ function isNflEvent(event: SupplierEvent): boolean {
     .join(' ')
     .toLowerCase();
 
-  return NFL_TERMS.some(term =>
+  return NFL_TERMS.some((term) =>
     searchableText.includes(term)
   );
 }
 
 export async function GET() {
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const collected: SupplierEvent[] = [];
-    let pagesChecked = 0;
-    let reachedLastPage = false;
+  const today = new Date().toISOString().slice(0, 10);
+  const unique = new Map<string, SupplierEvent>();
 
-    for (let page = 1; page <= MAX_PAGES; page++) {
+  let pagesChecked = 0;
+  let reachedLastPage = false;
+  let searchError: string | null = null;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    try {
       const params = new URLSearchParams({
         date_stop: `ge:${today}`,
         sorting: 'date_start:asc',
@@ -100,74 +102,62 @@ export async function GET() {
         : [];
 
       pagesChecked++;
-      collected.push(...pageEvents);
+
+      for (const event of pageEvents) {
+        if (
+          event.event_id &&
+          event.event_name &&
+          event.date_start &&
+          isNflEvent(event)
+        ) {
+          unique.set(event.event_id, event);
+        }
+      }
 
       if (pageEvents.length < PAGE_SIZE) {
         reachedLastPage = true;
         break;
       }
+    } catch {
+      searchError = `Supplier request failed on page ${page}`;
+      break;
     }
-
-    const unique = new Map<string, SupplierEvent>();
-
-    for (const event of collected) {
-      if (
-        event.event_id &&
-        event.event_name &&
-        event.date_start &&
-        isNflEvent(event)
-      ) {
-        unique.set(event.event_id, event);
-      }
-    }
-
-    const events = [...unique.values()]
-      .sort((a, b) =>
-        (a.date_start || '').localeCompare(
-          b.date_start || ''
-        )
-      )
-      .map(event => ({
-        event_id: event.event_id,
-        event_name: event.event_name,
-        tournament_name: event.tournament_name,
-        date_start: event.date_start,
-        date_stop: event.date_stop,
-        venue_name: event.venue_name,
-        city: event.city,
-        iso_country: event.iso_country,
-        event_status: event.event_status,
-      }));
-
-    return NextResponse.json(
-      {
-        testData: true,
-        sport: 'NFL',
-        diagnosticMode: false,
-        eventsReturned: events.length,
-        pagesChecked,
-        searchComplete: reachedLastPage,
-        events,
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
-    );
-  } catch {
-    return NextResponse.json(
-      {
-        testData: true,
-        sport: 'NFL',
-        error: 'NFL test events could not be loaded',
-      },
-      {
-        status: 503,
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
-    );
   }
+
+  const events = [...unique.values()]
+    .sort((a, b) =>
+      (a.date_start || '').localeCompare(
+        b.date_start || ''
+      )
+    )
+    .map((event) => ({
+      event_id: event.event_id,
+      event_name: event.event_name,
+      tournament_name: event.tournament_name,
+      date_start: event.date_start,
+      date_stop: event.date_stop,
+      venue_name: event.venue_name,
+      city: event.city,
+      iso_country: event.iso_country,
+      event_status: event.event_status,
+    }));
+
+  return NextResponse.json(
+    {
+      testData: true,
+      sport: 'NFL',
+      diagnosticMode: false,
+      eventsReturned: events.length,
+      pagesChecked,
+      searchComplete: reachedLastPage,
+      searchError,
+      events,
+    },
+    {
+      status: searchError && pagesChecked === 0 ? 503 : 200,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    }
+  );
 }
