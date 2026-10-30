@@ -22,13 +22,66 @@ type EventsResponse = {
 };
 
 const PAGE_SIZE = 50;
-const MAX_PAGES = 5;
+const MAX_PAGES = 20;
+
+const NFL_TERMS = [
+  'nfl',
+  'super bowl',
+  'american football',
+  'cincinnati bengals',
+  'atlanta falcons',
+  'new england patriots',
+  'kansas city chiefs',
+  'dallas cowboys',
+  'miami dolphins',
+  'jacksonville jaguars',
+  'new york giants',
+  'new york jets',
+  'san francisco 49ers',
+  'los angeles rams',
+  'los angeles chargers',
+  'philadelphia eagles',
+  'buffalo bills',
+  'chicago bears',
+  'detroit lions',
+  'green bay packers',
+  'pittsburgh steelers',
+  'baltimore ravens',
+  'cleveland browns',
+  'denver broncos',
+  'houston texans',
+  'indianapolis colts',
+  'las vegas raiders',
+  'minnesota vikings',
+  'new orleans saints',
+  'arizona cardinals',
+  'carolina panthers',
+  'seattle seahawks',
+  'tampa bay buccaneers',
+  'tennessee titans',
+  'washington commanders',
+];
+
+function isNflEvent(event: SupplierEvent): boolean {
+  const searchableText = [
+    event.event_name,
+    event.tournament_name,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return NFL_TERMS.some(term =>
+    searchableText.includes(term)
+  );
+}
 
 export async function GET() {
   try {
     const today = new Date().toISOString().slice(0, 10);
-
     const collected: SupplierEvent[] = [];
+    let pagesChecked = 0;
+    let reachedLastPage = false;
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const params = new URLSearchParams({
@@ -46,9 +99,11 @@ export async function GET() {
         ? response.events
         : [];
 
+      pagesChecked++;
       collected.push(...pageEvents);
 
       if (pageEvents.length < PAGE_SIZE) {
+        reachedLastPage = true;
         break;
       }
     }
@@ -59,7 +114,8 @@ export async function GET() {
       if (
         event.event_id &&
         event.event_name &&
-        event.date_start
+        event.date_start &&
+        isNflEvent(event)
       ) {
         unique.set(event.event_id, event);
       }
@@ -87,8 +143,10 @@ export async function GET() {
       {
         testData: true,
         sport: 'NFL',
-        diagnosticMode: true,
+        diagnosticMode: false,
         eventsReturned: events.length,
+        pagesChecked,
+        searchComplete: reachedLastPage,
         events,
       },
       {
@@ -102,7 +160,6 @@ export async function GET() {
       {
         testData: true,
         sport: 'NFL',
-        diagnosticMode: true,
         error: 'NFL test events could not be loaded',
       },
       {
