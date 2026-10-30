@@ -22,15 +22,34 @@ type EventsResponse = {
 };
 
 const PAGE_SIZE = 50;
-const MAX_PAGES = 5;
+const MAX_PAGES = 20;
+
+function isBoxingEvent(event: SupplierEvent): boolean {
+  const text = [
+    event.event_name,
+    event.tournament_name,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return [
+    'boxing',
+    'tyson fury',
+    'anthony joshua',
+    'fury vs joshua',
+    'fury v joshua',
+  ].some(term => text.includes(term));
+}
 
 export async function GET() {
   try {
     const collected: SupplierEvent[] = [];
+    let pagesChecked = 0;
+    let reachedLastPage = false;
 
     for (let page = 1; page <= MAX_PAGES; page++) {
       const params = new URLSearchParams({
-        sport_type: 'boxing',
         sorting: 'date_start:asc',
         page_size: String(PAGE_SIZE),
         page: String(page),
@@ -44,9 +63,11 @@ export async function GET() {
         ? response.events
         : [];
 
+      pagesChecked++;
       collected.push(...pageEvents);
 
       if (pageEvents.length < PAGE_SIZE) {
+        reachedLastPage = true;
         break;
       }
     }
@@ -54,7 +75,11 @@ export async function GET() {
     const unique = new Map<string, SupplierEvent>();
 
     for (const event of collected) {
-      if (event.event_id && event.event_name) {
+      if (
+        event.event_id &&
+        event.event_name &&
+        isBoxingEvent(event)
+      ) {
         unique.set(event.event_id, event);
       }
     }
@@ -81,8 +106,10 @@ export async function GET() {
       {
         testData: true,
         sport: 'Boxing',
-        diagnostic: 'Date filter temporarily removed',
+        diagnostic: 'Unfiltered event catalogue search',
         eventsReturned: events.length,
+        pagesChecked,
+        searchComplete: reachedLastPage,
         events,
       },
       {
