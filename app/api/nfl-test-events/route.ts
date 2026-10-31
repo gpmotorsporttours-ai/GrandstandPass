@@ -20,6 +20,7 @@ type EventsResponse = { events?: SupplierEvent[] };
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 60;
+const CONCURRENT_PAGES = 6;
 const CACHE_MS = 15 * 60 * 1000;
 
 const NFL_TERMS = [
@@ -66,32 +67,59 @@ async function loadEvents(): Promise<ApiResult> {
   let reachedLastPage = false;
   let searchError: string | null = null;
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    try {
-      const params = new URLSearchParams({
-        date_stop: `ge:${today}`,
-        sorting: 'date_start:asc',
-        page_size: String(PAGE_SIZE),
-        page: String(page),
-      });
-      const response = await xs2eventGet<EventsResponse>(
-        `/events?${params.toString()}`
-      );
-      const pageEvents = Array.isArray(response.events) ? response.events : [];
+  // Request a bounded batch concurrently. We only advance to the next
+  // batch after checking all results in page order, so a short final page
+  // still marks the end of the catalogue.
+  for (let firstPage = 1; firstPage <= MAX_PAGES; firstPage += CONCURRENT_PAGES) {
+    const lastPage = Math.min(firstPage + CONCURRENT_PAGES - 1, MAX_PAGES);
+    const pageNumbers = Array.from(
+      { length: lastPage - firstPage + 1 },
+      (_, index) => firstPage + index
+    );
+
+    const results = await Promise.all(
+      pageNumbers.map(async (page) => {
+        try {
+          const params = new URLSearchParams({
+            date_stop: `ge:${today}`,
+            sorting: 'date_start:asc',
+            page_size: String(PAGE_SIZE),
+            page: String(page),
+          });
+          const response = await xs2eventGet<EventsResponse>(
+            `/events?${params.toString()}`
+          );
+          return {
+            page,
+            events: Array.isArray(response.events) ? response.events : [],
+            failed: false,
+          };
+        } catch {
+          return { page, events: [] as SupplierEvent[], failed: true };
+        }
+      })
+    );
+
+    for (const result of results) {
+      if (result.failed) {
+        searchError = `Supplier request failed on page ${result.page}`;
+        break;
+      }
+
       pagesChecked++;
-      for (const event of pageEvents) {
+      for (const event of result.events) {
         if (event.event_id && event.event_name && event.date_start && isNflEvent(event)) {
           unique.set(event.event_id, event);
         }
       }
-      if (pageEvents.length < PAGE_SIZE) {
+
+      if (result.events.length < PAGE_SIZE) {
         reachedLastPage = true;
         break;
       }
-    } catch {
-      searchError = `Supplier request failed on page ${page}`;
-      break;
     }
+
+    if (reachedLastPage || searchError) break;
   }
 
   const events = [...unique.values()]
