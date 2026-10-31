@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import { xs2eventGet } from '../../../lib/xs2event';
 
@@ -17,69 +16,52 @@ type SupplierEvent = {
   event_status?: string;
 };
 
-type EventsResponse = {
-  events?: SupplierEvent[];
-};
+type EventsResponse = { events?: SupplierEvent[] };
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 60;
+const CACHE_MS = 15 * 60 * 1000;
 
 const NFL_TERMS = [
-  'nfl',
-  'super bowl',
-  'american football',
-  'cincinnati bengals',
-  'atlanta falcons',
-  'new england patriots',
-  'kansas city chiefs',
-  'dallas cowboys',
-  'miami dolphins',
-  'jacksonville jaguars',
-  'new york giants',
-  'new york jets',
-  'san francisco 49ers',
-  'los angeles rams',
-  'los angeles chargers',
-  'philadelphia eagles',
-  'buffalo bills',
-  'chicago bears',
-  'detroit lions',
-  'green bay packers',
-  'pittsburgh steelers',
-  'baltimore ravens',
-  'cleveland browns',
-  'denver broncos',
-  'houston texans',
-  'indianapolis colts',
-  'las vegas raiders',
-  'minnesota vikings',
-  'new orleans saints',
-  'arizona cardinals',
-  'carolina panthers',
-  'seattle seahawks',
-  'tampa bay buccaneers',
-  'tennessee titans',
-  'washington commanders',
+  'nfl', 'super bowl', 'american football', 'cincinnati bengals',
+  'atlanta falcons', 'new england patriots', 'kansas city chiefs',
+  'dallas cowboys', 'miami dolphins', 'jacksonville jaguars',
+  'new york giants', 'new york jets', 'san francisco 49ers',
+  'los angeles rams', 'los angeles chargers', 'philadelphia eagles',
+  'buffalo bills', 'chicago bears', 'detroit lions', 'green bay packers',
+  'pittsburgh steelers', 'baltimore ravens', 'cleveland browns',
+  'denver broncos', 'houston texans', 'indianapolis colts',
+  'las vegas raiders', 'minnesota vikings', 'new orleans saints',
+  'arizona cardinals', 'carolina panthers', 'seattle seahawks',
+  'tampa bay buccaneers', 'tennessee titans', 'washington commanders',
 ];
 
 function isNflEvent(event: SupplierEvent): boolean {
-  const searchableText = [
-    event.event_name,
-    event.tournament_name,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return NFL_TERMS.some((term) =>
-    searchableText.includes(term)
-  );
+  const searchableText = [event.event_name, event.tournament_name]
+    .filter(Boolean).join(' ').toLowerCase();
+  return NFL_TERMS.some((term) => searchableText.includes(term));
 }
 
-export async function GET() {
+type ApiResult = {
+  testData: boolean;
+  sport: string;
+  diagnosticMode: boolean;
+  eventsReturned: number;
+  pagesChecked: number;
+  searchComplete: boolean;
+  searchError: string | null;
+  events: SupplierEvent[];
+};
+
+type CachedResult = { value: ApiResult; expiresAt: number };
+
+// Best-effort server-instance cache. Serverless instances may not share this cache.
+let cached: CachedResult | null = null;
+let inFlight: Promise<ApiResult> | null = null;
+
+async function loadEvents(): Promise<ApiResult> {
   const today = new Date().toISOString().slice(0, 10);
   const unique = new Map<string, SupplierEvent>();
-
   let pagesChecked = 0;
   let reachedLastPage = false;
   let searchError: string | null = null;
@@ -92,28 +74,16 @@ export async function GET() {
         page_size: String(PAGE_SIZE),
         page: String(page),
       });
-
       const response = await xs2eventGet<EventsResponse>(
         `/events?${params.toString()}`
       );
-
-      const pageEvents = Array.isArray(response.events)
-        ? response.events
-        : [];
-
+      const pageEvents = Array.isArray(response.events) ? response.events : [];
       pagesChecked++;
-
       for (const event of pageEvents) {
-        if (
-          event.event_id &&
-          event.event_name &&
-          event.date_start &&
-          isNflEvent(event)
-        ) {
+        if (event.event_id && event.event_name && event.date_start && isNflEvent(event)) {
           unique.set(event.event_id, event);
         }
       }
-
       if (pageEvents.length < PAGE_SIZE) {
         reachedLastPage = true;
         break;
@@ -125,11 +95,7 @@ export async function GET() {
   }
 
   const events = [...unique.values()]
-    .sort((a, b) =>
-      (a.date_start || '').localeCompare(
-        b.date_start || ''
-      )
-    )
+    .sort((a, b) => (a.date_start || '').localeCompare(b.date_start || ''))
     .map((event) => ({
       event_id: event.event_id,
       event_name: event.event_name,
@@ -142,22 +108,41 @@ export async function GET() {
       event_status: event.event_status,
     }));
 
-  return NextResponse.json(
-    {
-      testData: true,
-      sport: 'NFL',
-      diagnosticMode: false,
-      eventsReturned: events.length,
-      pagesChecked,
-      searchComplete: reachedLastPage,
-      searchError,
-      events,
+  return {
+    testData: true,
+    sport: 'NFL',
+    diagnosticMode: false,
+    eventsReturned: events.length,
+    pagesChecked,
+    searchComplete: reachedLastPage,
+    searchError,
+    events,
+  };
+}
+
+export async function GET() {
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return NextResponse.json(cached.value, {
+      headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=300' },
+    });
+  }
+
+  if (!inFlight) {
+    inFlight = loadEvents().finally(() => { inFlight = null; });
+  }
+
+  const result = await inFlight;
+  // Cache only successful scans. Do not turn supplier failures into long-lived results.
+  if (!result.searchError) {
+    cached = { value: result, expiresAt: Date.now() + CACHE_MS };
+  }
+  return NextResponse.json(result, {
+    status: result.searchError && result.pagesChecked === 0 ? 503 : 200,
+    headers: {
+      'Cache-Control': result.searchError
+        ? 'no-store'
+        : 'public, s-maxage=900, stale-while-revalidate=300',
     },
-    {
-      status: searchError && pagesChecked === 0 ? 503 : 200,
-      headers: {
-        'Cache-Control': 'no-store',
-      },
-    }
-  );
+  });
 }
