@@ -8,6 +8,7 @@ import BasketballEventBrowser from '../../../components/BasketballEventBrowser';
 import GolfEventBrowser from '../../../components/GolfEventBrowser';
 import HorseRacingEventBrowser from '../../../components/HorseRacingEventBrowser';
 import RugbyEventBrowser from '../../../components/RugbyEventBrowser';
+import NFLEventBrowser from '../../../components/NFLEventBrowser';
 import AvailabilityMessage from '../../../components/AvailabilityMessage';
 import { sports, sportSlug } from '../../../lib/data';
 
@@ -43,6 +44,7 @@ export default async function SportPage({
   const isGolf = sport === 'Golf';
   const isHorseRacing = sport === 'Horse Racing';
   const isRugby = sport === 'Rugby';
+  const isNFL = sport === 'NFL';
   const isCricket = sport === 'Cricket';
   const isBoxing = sport === 'Boxing';
 
@@ -75,11 +77,13 @@ export default async function SportPage({
                         ? 'Explore upcoming Horse Racing meetings and festivals, including Cheltenham, with XS2Event test ticket offers.'
                         : isRugby
                           ? 'Explore international Rugby matches, the Six Nations, Nations Championship and the 2027 Rugby World Championship using XS2Event test ticket offers.'
-                          : isCricket
-                            ? 'Explore Cricket tickets for international matches, tournaments and major competitions around the world.'
-                            : isBoxing
-                              ? 'Explore upcoming Boxing events, championship fights and major international bouts.'
-                              : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
+                          : isNFL
+                            ? 'Explore NFL International Games and Super Bowl events using XS2Event test ticket offers.'
+                            : isCricket
+                              ? 'Explore Cricket tickets for international matches, tournaments and major competitions around the world.'
+                              : isBoxing
+                                ? 'Explore upcoming Boxing events, championship fights and major international bouts.'
+                                : `Discover upcoming ${sport.toLowerCase()} experiences around the world.`}
           </p>
         </div>
       </section>
@@ -99,6 +103,8 @@ export default async function SportPage({
           <HorseRacingEventBrowser />
         ) : isRugby ? (
           <RugbyEventBrowser />
+        ) : isNFL ? (
+          <NFLEventBrowser />
         ) : isUnavailableSport ? (
           <section className="py-12">
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
