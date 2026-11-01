@@ -2,29 +2,30 @@
 import Link from 'next/link';
 import { ArrowRight, ChevronRight } from 'lucide-react';
 import EventBrowser from '../components/EventBrowser';
+import HomeSupplierEvents from '../components/HomeSupplierEvents';
 import { sportSlug } from '../lib/data';
 
 const tiles = [
   {
-  name: 'Football',
-  image: '/football-category.png',
-},
+    name: 'Football',
+    image: '/football-category.png',
+  },
   {
-  name: 'Formula 1',
-  image: '/formula-1-category.png',
-},
+    name: 'Formula 1',
+    image: '/formula-1-category.png',
+  },
   {
-  name: 'MotoGP',
-  image: '/motogp-category.png',
-},
+    name: 'MotoGP',
+    image: '/motogp-category.png',
+  },
   {
-  name: 'Tennis',
-  image: '/tennis-category.png',
-},
+    name: 'Tennis',
+    image: '/tennis-category.png',
+  },
   {
-  name: 'Other Events',
-  image: '/other-events-category.png',
-},
+    name: 'Other Events',
+    image: '/other-events-category.png',
+  },
 ];
 
 export default function Home() {
@@ -84,7 +85,10 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Event listings */}
+      {/* Supplier-connected NFL events */}
+      <HomeSupplierEvents />
+
+      {/* Existing event listings — retained during testing */}
       <div className="container-wide">
         <EventBrowser />
       </div>
