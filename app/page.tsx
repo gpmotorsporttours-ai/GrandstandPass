@@ -34,7 +34,7 @@ export default function Home() {
       {/* New Grandstand Pass homepage banner */}
       <section className="relative bg-navy overflow-hidden">
         <img
-          src="/grandstand-pass-banner.jpg"
+          src="/grandstand-pass-banner-v2.png"
           alt="Grandstand Pass sports tickets featuring Formula 1, football, tennis and MotoGP"
           className="block w-full h-auto"
         />
