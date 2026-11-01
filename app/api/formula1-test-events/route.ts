@@ -21,8 +21,28 @@ type EventsResponse = {
   events?: SupplierEvent[];
 };
 
+type ApiResult = {
+  testData: boolean;
+  sport: string;
+  eventsReturned: number;
+  pagesChecked: number;
+  searchComplete: boolean;
+  searchError: string | null;
+  events: SupplierEvent[];
+};
+
 const PAGE_SIZE = 50;
-const MAX_PAGES = 5;
+const MAX_PAGES = 20;
+const CONCURRENT_PAGES = 5;
+const CACHE_MS = 15 * 60 * 1000;
+
+type CachedResult = {
+  value: ApiResult;
+  expiresAt: number;
+};
+
+let cached: CachedResult | null = null;
+let inFlight: Promise<ApiResult> | null = null;
 
 function isRealGrandPrix(event: SupplierEvent): boolean {
   const name = event.event_name?.trim() || '';
@@ -35,111 +55,161 @@ function isRealGrandPrix(event: SupplierEvent): boolean {
     return false;
   }
 
-  // Exclude unrelated and artificial supplier test records.
-  if (
-    /test|dummy|sample|atp tour|motogp/i.test(name)
-  ) {
+  if (/test|dummy|sample|atp tour|motogp/i.test(name)) {
     return false;
   }
 
-  // Only include recognised Grand Prix event names.
-  if (!/grand prix/i.test(name)) {
-    return false;
-  }
-
-  return true;
+  return /grand prix/i.test(name);
 }
 
-export async function GET() {
-  try {
-    const today = new Date()
-      .toISOString()
-      .slice(0, 10);
+async function loadEvents(): Promise<ApiResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const unique = new Map<string, SupplierEvent>();
 
-    const collected: SupplierEvent[] = [];
+  let pagesChecked = 0;
+  let reachedLastPage = false;
+  let searchError: string | null = null;
 
-    for (
-      let page = 1;
-      page <= MAX_PAGES;
-      page++
-    ) {
-      const params = new URLSearchParams({
-        sport_type: 'formula1',
-        date_stop: `ge:${today}`,
-        sorting: 'date_start:asc',
-        page_size: String(PAGE_SIZE),
-        page: String(page),
-      });
+  for (
+    let firstPage = 1;
+    firstPage <= MAX_PAGES;
+    firstPage += CONCURRENT_PAGES
+  ) {
+    const lastPage = Math.min(
+      firstPage + CONCURRENT_PAGES - 1,
+      MAX_PAGES
+    );
 
-      const response = await xs2eventGet<EventsResponse>(
-        `/events?${params.toString()}`
-      );
+    const pageNumbers = Array.from(
+      { length: lastPage - firstPage + 1 },
+      (_, index) => firstPage + index
+    );
 
-      const pageEvents = Array.isArray(response.events)
-        ? response.events
-        : [];
+    const results = await Promise.all(
+      pageNumbers.map(async page => {
+        try {
+          const params = new URLSearchParams({
+            sport_type: 'formula1',
+            date_stop: `ge:${today}`,
+            sorting: 'date_start:asc',
+            page_size: String(PAGE_SIZE),
+            page: String(page),
+          });
 
-      collected.push(...pageEvents);
+          const response = await xs2eventGet<EventsResponse>(
+            `/events?${params.toString()}`
+          );
 
-      if (pageEvents.length < PAGE_SIZE) {
+          return {
+            page,
+            events: Array.isArray(response.events)
+              ? response.events
+              : [],
+            failed: false,
+          };
+        } catch {
+          return {
+            page,
+            events: [] as SupplierEvent[],
+            failed: true,
+          };
+        }
+      })
+    );
+
+    for (const result of results) {
+      if (result.failed) {
+        searchError =
+          `Supplier request failed on page ${result.page}`;
+        break;
+      }
+
+      pagesChecked++;
+
+      for (const event of result.events) {
+        if (
+          isRealGrandPrix(event) &&
+          event.event_id
+        ) {
+          unique.set(event.event_id, event);
+        }
+      }
+
+      if (result.events.length < PAGE_SIZE) {
+        reachedLastPage = true;
         break;
       }
     }
 
-    const unique = new Map<string, SupplierEvent>();
-
-    for (const event of collected) {
-      if (
-        isRealGrandPrix(event) &&
-        event.event_id
-      ) {
-        unique.set(event.event_id, event);
-      }
+    if (reachedLastPage || searchError) {
+      break;
     }
-
-    const events = [...unique.values()]
-      .sort((a, b) =>
-        (a.date_start || '').localeCompare(
-          b.date_start || ''
-        )
-      )
-      .map(event => ({
-        event_id: event.event_id,
-        event_name: event.event_name,
-        date_start: event.date_start,
-        date_stop: event.date_stop,
-        venue_name: event.venue_name,
-        city: event.city,
-        iso_country: event.iso_country,
-        event_status: event.event_status,
-      }));
-
-    return NextResponse.json(
-      {
-        testData: true,
-        sport: 'Formula 1',
-        eventsReturned: events.length,
-        events,
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
-    );
-  } catch {
-    return NextResponse.json(
-      {
-        testData: true,
-        sport: 'Formula 1',
-        error: 'Formula 1 test events could not be loaded',
-      },
-      {
-        status: 503,
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
-    );
   }
+
+  const events = [...unique.values()]
+    .sort((a, b) =>
+      (a.date_start || '').localeCompare(
+        b.date_start || ''
+      )
+    )
+    .map(event => ({
+      event_id: event.event_id,
+      event_name: event.event_name,
+      date_start: event.date_start,
+      date_stop: event.date_stop,
+      venue_name: event.venue_name,
+      city: event.city,
+      iso_country: event.iso_country,
+      event_status: event.event_status,
+    }));
+
+  return {
+    testData: true,
+    sport: 'Formula 1',
+    eventsReturned: events.length,
+    pagesChecked,
+    searchComplete: reachedLastPage,
+    searchError,
+    events,
+  };
+}
+
+export async function GET() {
+  const now = Date.now();
+
+  if (cached && cached.expiresAt > now) {
+    return NextResponse.json(cached.value, {
+      headers: {
+        'Cache-Control':
+          'public, s-maxage=900, stale-while-revalidate=300',
+      },
+    });
+  }
+
+  if (!inFlight) {
+    inFlight = loadEvents().finally(() => {
+      inFlight = null;
+    });
+  }
+
+  const result = await inFlight;
+
+  if (!result.searchError) {
+    cached = {
+      value: result,
+      expiresAt: Date.now() + CACHE_MS,
+    };
+  }
+
+  return NextResponse.json(result, {
+    status:
+      result.searchError && result.pagesChecked === 0
+        ? 503
+        : 200,
+    headers: {
+      'Cache-Control': result.searchError
+        ? 'no-store'
+        : 'public, s-maxage=900, stale-while-revalidate=300',
+    },
+  });
 }
