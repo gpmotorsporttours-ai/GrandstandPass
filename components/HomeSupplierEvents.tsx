@@ -26,6 +26,16 @@ type EventsResponse = {
   events: SupplierEvent[];
   searchComplete?: boolean;
   searchError?: string | null;
+  supplierFootballEvents?: FootballSupplierEvent[];
+};
+
+type FootballSupplierEvent = {
+  supplierEventId: string;
+  name: string;
+  date: string;
+  location?: string;
+  region?: string;
+  competition?: string;
 };
 
 type SportConfig = {
@@ -35,10 +45,19 @@ type SportConfig = {
   ticketPath: string;
   browsePath: string;
   browseLabel: string;
-  sport: 'nfl' | 'formula1' | 'motogp' | 'tennis';
+  sport: 'nfl' | 'formula1' | 'motogp' | 'tennis' | 'football';
 };
 
 const sportConfigs: SportConfig[] = [
+  {
+    title: 'Football Events',
+    label: 'FOOTBALL · TEST',
+    api: '/api/football-test-events',
+    ticketPath: '/football/tickets',
+    browsePath: '/sport/football',
+    browseLabel: 'Browse all Football events',
+    sport: 'football',
+  },
   {
     title: 'Formula 1 Events',
     label: 'FORMULA 1 · TEST',
@@ -116,6 +135,10 @@ function eventImage(
   const text = (
     `${event.event_name} ${event.tournament_name || ''}`
   ).toLowerCase();
+
+  if (sport === 'football') {
+    return '/football-category.png';
+  }
 
   if (sport === 'nfl') {
     return /super bowl/i.test(text)
@@ -278,14 +301,37 @@ function SupplierSportSection({
 
         if (
           data.testData !== true ||
-          !Array.isArray(data.events)
+          (!Array.isArray(data.events) &&
+            !(config.sport === 'football' &&
+              Array.isArray(data.supplierFootballEvents)))
         ) {
           throw new Error('Unexpected supplier response');
         }
 
+        // The Football API retains a legacy supplierFootballEvents shape.
+        // Normalize it to the shared homepage event shape when available.
+        const footballEvents: SupplierEvent[] =
+          config.sport === 'football' &&
+          Array.isArray(data.supplierFootballEvents)
+            ? data.supplierFootballEvents
+                .filter(item =>
+                  typeof item.supplierEventId === 'string' &&
+                  typeof item.name === 'string' &&
+                  typeof item.date === 'string'
+                )
+                .map(item => ({
+                  event_id: item.supplierEventId,
+                  event_name: item.name,
+                  date_start: item.date,
+                  tournament_name: item.competition,
+                  venue_name: item.location,
+                  iso_country: item.region,
+                }))
+            : data.events;
+
         const today = new Date().toISOString().slice(0, 10);
 
-        const valid = data.events
+        const valid = footballEvents
           .filter(event =>
             typeof event.event_id === 'string' &&
             Boolean(event.event_id) &&
