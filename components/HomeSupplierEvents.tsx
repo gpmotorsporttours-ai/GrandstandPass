@@ -35,7 +35,7 @@ type SportConfig = {
   ticketPath: string;
   browsePath: string;
   browseLabel: string;
-  sport: 'nfl' | 'formula1' | 'motogp';
+  sport: 'nfl' | 'formula1' | 'motogp' | 'tennis';
 };
 
 const sportConfigs: SportConfig[] = [
@@ -65,6 +65,15 @@ const sportConfigs: SportConfig[] = [
     browsePath: '/sport/nfl',
     browseLabel: 'Browse all NFL events',
     sport: 'nfl',
+  },
+  {
+    title: 'Tennis Events',
+    label: 'TENNIS · TEST',
+    api: '/api/tennis-test-events',
+    ticketPath: '/tennis/tickets',
+    browsePath: '/sport/tennis',
+    browseLabel: 'Browse all Tennis events',
+    sport: 'tennis',
   },
 ];
 
@@ -112,6 +121,10 @@ function eventImage(
     return /super bowl/i.test(text)
       ? '/nfl/Super%20Bowl.jpg'
       : '/nfl/NFL%20Regular%20Season.jpg';
+  }
+
+  if (sport === 'tennis') {
+    return '/tennis-category.png';
   }
 
   if (sport === 'motogp') {
