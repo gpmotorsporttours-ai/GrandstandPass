@@ -35,7 +35,7 @@ type SportConfig = {
   ticketPath: string;
   browsePath: string;
   browseLabel: string;
-  sport: 'nfl' | 'formula1';
+  sport: 'nfl' | 'formula1' | 'motogp';
 };
 
 const sportConfigs: SportConfig[] = [
@@ -47,6 +47,15 @@ const sportConfigs: SportConfig[] = [
     browsePath: '/sport/formula-1',
     browseLabel: 'Browse all Formula 1 events',
     sport: 'formula1',
+  },
+  {
+    title: 'MotoGP Events',
+    label: 'MOTOGP · TEST',
+    api: '/api/motogp-test-events',
+    ticketPath: '/motogp/tickets',
+    browsePath: '/sport/motogp',
+    browseLabel: 'Browse all MotoGP events',
+    sport: 'motogp',
   },
   {
     title: 'NFL Events',
@@ -103,6 +112,12 @@ function eventImage(
     return /super bowl/i.test(text)
       ? '/nfl/Super%20Bowl.jpg'
       : '/nfl/NFL%20Regular%20Season.jpg';
+  }
+
+  if (sport === 'motogp') {
+    // Use the confirmed homepage MotoGP image until individual
+    // circuit image filenames have been verified.
+    return '/motogp-category.png';
   }
 
   // Match supplier Grand Prix names to the existing
