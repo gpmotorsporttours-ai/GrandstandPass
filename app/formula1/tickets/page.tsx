@@ -272,6 +272,27 @@ async function findSupplierEvent(
   return undefined;
 }
 
+// Do not request or display supplier circuit maps for these two events.
+// Ticket listings remain available as normal.
+function isCircuitMapExcluded(event: SupplierEvent): boolean {
+  const name = [event.event_name, event.tournament_name]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const location = [event.venue_name, event.city, event.iso_country]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    /las\s*vegas/.test(`${name} ${location}`) ||
+    /saudi\s*arabia|saudi\s*arabian|jeddah|jiddah|jidda|corniche/.test(
+      `${name} ${location}`
+    ) ||
+    event.iso_country?.toUpperCase() === 'SA'
+  );
+}
+
 export default async function Formula1TicketsPage({
   searchParams,
 }: {
@@ -455,7 +476,7 @@ export default async function Formula1TicketsPage({
             </div>
           </header>
 
-          {event.venue_id && (
+          {event.venue_id && !isCircuitMapExcluded(event) && (
             <SupplierVenueMap
               venueId={event.venue_id}
               venueName={event.venue_name || 'Grand Prix circuit'}
