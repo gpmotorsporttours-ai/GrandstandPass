@@ -11,6 +11,7 @@ import { getTicketDisplayPrice } from '../../../lib/ticketPricing';
 import { isSupportedCurrency } from '../../../lib/currency';
 import FootballDisplayPrice from '../../../components/FootballDisplayPrice';
 import SupplierTestCartButton from '../../../components/SupplierTestCartButton';
+import SupplierVenueMap from '../../../components/SupplierVenueMap';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ type SupplierEvent = {
   event_name?: string;
   tournament_name?: string;
   venue_name?: string;
+  venue_id?: string;
   city?: string;
   iso_country?: string;
   date_start?: string;
@@ -452,6 +454,13 @@ export default async function Formula1TicketsPage({
               </p>
             </div>
           </header>
+
+          {event.venue_id && (
+            <SupplierVenueMap
+              venueId={event.venue_id}
+              venueName={event.venue_name || 'Grand Prix circuit'}
+            />
+          )}
 
           <section className="mt-10">
             <div className="flex items-center gap-3">
