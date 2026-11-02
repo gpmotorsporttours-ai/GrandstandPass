@@ -186,6 +186,7 @@ export default function EventBrowser({
   const [query, setQuery] = useState('');
   const [sport, setSport] = useState(initialSport);
   const [region, setRegion] = useState(initialRegion);
+  const [footballCompetition, setFootballCompetition] = useState('All');
   const [sort, setSort] = useState('date');
   const [supplierPage, setSupplierPage] = useState(1);
   const [availableOffersOnly, setAvailableOffersOnly] = useState(false);
@@ -352,6 +353,23 @@ export default function EventBrowser({
       );
   }, [query, sport, region, sort, availableOffersOnly]);
 
+  // Competition choices follow the selected country and the supplier feed.
+  const footballCompetitionOptions = useMemo(() => {
+    if (!showSupplierFootball) return [];
+    return [...new Set(
+      supplierFootballEvents
+        .filter(event => region === 'All' || event.region === region)
+        .map(event => event.competition?.trim())
+        .filter((name): name is string => Boolean(name))
+    )].sort((a, b) => a.localeCompare(b));
+  }, [supplierFootballEvents, showSupplierFootball, region]);
+
+  const selectedFootballCompetition =
+    footballCompetition === 'All' ||
+    footballCompetitionOptions.includes(footballCompetition)
+      ? footballCompetition
+      : 'All';
+
   const filteredSupplierEvents = useMemo(() => {
     if (!showSupplierFootball) {
       return [];
@@ -375,12 +393,16 @@ export default function EventBrowser({
           .toLowerCase()
           .includes(search);
 
+        const competitionMatches =
+          selectedFootballCompetition === 'All' ||
+          event.competition?.trim() === selectedFootballCompetition;
+
         const availabilityMatches =
           !availableOffersOnly ||
           (Boolean(event.supplierEventId) &&
             availabilityByEvent[event.supplierEventId!] === 'available');
 
-        return regionMatches && searchMatches && availabilityMatches;
+        return regionMatches && searchMatches && competitionMatches && availabilityMatches;
       })
       .sort((a, b) =>
         a.date.localeCompare(b.date)
@@ -392,6 +414,7 @@ export default function EventBrowser({
     query,
     availableOffersOnly,
     availabilityByEvent,
+    selectedFootballCompetition,
   ]);
 
   const supplierPageCount = Math.ceil(
@@ -503,6 +526,7 @@ export default function EventBrowser({
           onChange={e => {
             setSport(e.target.value);
             setRegion('All');
+            setFootballCompetition('All');
             setSupplierPage(1);
           }}
           aria-label="Sport"
@@ -521,6 +545,7 @@ export default function EventBrowser({
           value={region}
           onChange={e => {
             setRegion(e.target.value);
+            setFootballCompetition('All');
             setSupplierPage(1);
           }}
           aria-label="Region"
@@ -552,6 +577,31 @@ export default function EventBrowser({
           )}
         </select>
       </div>
+
+      {showSupplierFootball && (
+        <div className="mb-5 rounded-xl border border-slate-200 bg-ice p-4">
+          <label htmlFor="football-competition" className="block text-sm font-bold text-navy mb-2">
+            Football competition
+          </label>
+          <select
+            id="football-competition"
+            className="field w-full md:max-w-md"
+            value={selectedFootballCompetition}
+            onChange={e => {
+              setFootballCompetition(e.target.value);
+              setSupplierPage(1);
+            }}
+          >
+            <option value="All">All competitions</option>
+            {footballCompetitionOptions.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+          <p className="muted text-xs mt-2">
+            Competitions are provided by XS2Event test data for the selected country.
+          </p>
+        </div>
+      )}
 
       {showSupplierFootball && (
         <div className="mb-7 rounded-xl border border-slate-200 bg-white p-4">
@@ -866,6 +916,7 @@ export default function EventBrowser({
               setQuery('');
               setRegion('All');
               setSport(initialSport);
+              setFootballCompetition('All');
               setAvailableOffersOnly(false);
               setSupplierPage(1);
             }}
