@@ -11,6 +11,7 @@ import { getTicketDisplayPrice } from '../../../lib/ticketPricing';
 import { isSupportedCurrency } from '../../../lib/currency';
 import FootballDisplayPrice from '../../../components/FootballDisplayPrice';
 import SupplierTestCartButton from '../../../components/SupplierTestCartButton';
+import SupplierVenueMap from '../../../components/SupplierVenueMap';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ type SupplierEvent = {
   event_name?: string;
   tournament_name?: string;
   venue_name?: string;
+  venue_id?: string;
   city?: string;
   iso_country?: string;
   date_start?: string;
@@ -297,7 +299,7 @@ export default async function MotoGPTicketsPage({
           href="/sport/motogp"
           className="text-blue font-bold hover:underline"
         >
-          ← Back to MotoGP
+          ‚Üê Back to MotoGP
         </Link>
 
         <section className="mt-8 rounded-2xl border bg-white p-8 md:p-12">
@@ -313,7 +315,7 @@ export default async function MotoGPTicketsPage({
           </p>
 
           <p className="muted mt-6 text-xs">
-            TEST DATA — NOT FOR SALE.
+            TEST DATA ‚Äî NOT FOR SALE.
             No reservations or payments can be made.
             Checkout remains disabled.
           </p>
@@ -388,11 +390,11 @@ export default async function MotoGPTicketsPage({
         href="/sport/motogp"
         className="text-blue font-bold hover:underline"
       >
-        ← Back to MotoGP
+        ‚Üê Back to MotoGP
       </Link>
 
       <div className="mt-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-        <strong>TEST DATA — NOT FOR SALE.</strong>{' '}
+        <strong>TEST DATA ‚Äî NOT FOR SALE.</strong>{' '}
         Ticket offers are for development only.
         No reservation or payment can be made.
         Checkout remains disabled.
@@ -454,6 +456,13 @@ export default async function MotoGPTicketsPage({
               </p>
             </div>
           </header>
+
+          {event.venue_id && (
+            <SupplierVenueMap
+              venueId={event.venue_id}
+              venueName={event.venue_name || 'MotoGP circuit'}
+            />
+          )}
 
           <section className="mt-10">
             <div className="flex items-center gap-3">
@@ -526,7 +535,7 @@ export default async function MotoGPTicketsPage({
                           Reported availability:{' '}
                           {ticket.stock ?? 'Unknown'}{' '}
                           tickets
-                          {' · '}
+                          {' ¬∑ '}
                           Minimum order:{' '}
                           {ticket.min_order ?? 1}
                         </p>
@@ -609,7 +618,7 @@ export default async function MotoGPTicketsPage({
           </section>
 
           <p className="muted mt-8 text-xs">
-            Indicative prices include a €5 handling
+            Indicative prices include a ‚Ç¨5 handling
             allowance per ticket and 15% markup.
             Taxes, payment charges and other costs
             are not yet confirmed. Supplier availability
