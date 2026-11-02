@@ -617,6 +617,7 @@ export default async function Formula1TicketsPage({
                             categoryId={ticket.category_id}
                             stock={ticket.stock!}
                             minOrder={ticket.min_order ?? 1}
+                            pairsOnly={ticket.options?.pairs_only === true}
                             sellingPrice={sellingPrice}
                             displayPrices={displayPrices}
                             currency={currency!}
