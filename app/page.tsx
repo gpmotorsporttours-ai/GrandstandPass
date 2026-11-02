@@ -1,45 +1,28 @@
-
 import Link from 'next/link';
 import { ArrowRight, ChevronRight } from 'lucide-react';
 import EventBrowser from '../components/EventBrowser';
 import HomeSupplierEvents from '../components/HomeSupplierEvents';
+import FeaturedFootballMatches from '../components/FeaturedFootballMatches';
 import { sportSlug } from '../lib/data';
 
 const tiles = [
-  {
-    name: 'Football',
-    image: '/football-category.png',
-  },
-  {
-    name: 'Formula 1',
-    image: '/formula-1-category.png',
-  },
-  {
-    name: 'MotoGP',
-    image: '/motogp-category.png',
-  },
-  {
-    name: 'Tennis',
-    image: '/tennis-category.png',
-  },
-  {
-    name: 'Other Events',
-    image: '/other-events-category.png',
-  },
+  { name: 'Football', image: '/football-category.png' },
+  { name: 'Formula 1', image: '/formula-1-category.png' },
+  { name: 'MotoGP', image: '/motogp-category.png' },
+  { name: 'Tennis', image: '/tennis-category.png' },
+  { name: 'Other Events', image: '/other-events-category.png' },
 ];
 
 export default function Home() {
   return (
     <>
-      {/* New Grandstand Pass homepage banner */}
+      {/* Approved Grandstand Pass homepage banner — unchanged */}
       <section className="relative bg-navy overflow-hidden">
         <img
           src="/grandstand-pass-banner-v2.png"
           alt="Grandstand Pass sports tickets featuring Formula 1, football, tennis and MotoGP"
           className="block w-full h-auto"
         />
-
-        {/* Invisible clickable area over the banner's Browse Events button */}
         <Link
           href="/#events"
           aria-label="Browse sporting events"
@@ -47,25 +30,15 @@ export default function Home() {
         />
       </section>
 
-      {/* Browse by sport */}
+      {/* Browse by sport — unchanged */}
       <section className="container-wide py-14">
-        <div className="eyebrow mb-2">
-          Something for every fan
-        </div>
-
-        <h2 className="section-title mb-7">
-          Browse by sport
-        </h2>
-
+        <div className="eyebrow mb-2">Something for every fan</div>
+        <h2 className="section-title mb-7">Browse by sport</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {tiles.map((tile) => (
             <Link
               key={tile.name}
-              href={
-                tile.name === 'Football'
-                  ? '/football'
-                  : '/sport/' + sportSlug(tile.name)
-              }
+              href={tile.name === 'Football' ? '/football' : '/sport/' + sportSlug(tile.name)}
               className="relative h-44 md:h-52 rounded-xl overflow-hidden group"
             >
               <img
@@ -73,9 +46,7 @@ export default function Home() {
                 src={tile.image}
                 alt={tile.name}
               />
-
               <div className="absolute inset-0 bg-gradient-to-t from-[#051934e8] via-transparent to-transparent" />
-
               <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white font-extrabold">
                 <span>{tile.name}</span>
                 <ChevronRight size={18} />
@@ -85,7 +56,10 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Supplier-connected NFL events */}
+      {/* Featured Football Matches — new */}
+      <FeaturedFootballMatches />
+
+      {/* Existing supplier-connected sport sections — unchanged */}
       <HomeSupplierEvents />
 
       {/* Existing event listings — retained during testing */}
@@ -93,27 +67,15 @@ export default function Home() {
         <EventBrowser />
       </div>
 
-      {/* Bottom promotional section */}
+      {/* Bottom promotional section — unchanged */}
       <section className="bg-navy text-white">
         <div className="container-wide py-16 flex flex-col md:flex-row justify-between items-center gap-7">
           <div>
-            <div className="eyebrow text-blue-300 mb-2">
-              Make it unforgettable
-            </div>
-
-            <h2 className="text-3xl font-black">
-              Every moment starts with a ticket.
-            </h2>
-
-            <p className="text-slate-300 mt-2">
-              Explore events around the globe with Grandstand Pass.
-            </p>
+            <div className="eyebrow text-blue-300 mb-2">Make it unforgettable</div>
+            <h2 className="text-3xl font-black">Every moment starts with a ticket.</h2>
+            <p className="text-slate-300 mt-2">Explore events around the globe with Grandstand Pass.</p>
           </div>
-
-          <Link
-            className="btn-primary shrink-0"
-            href="/#events"
-          >
+          <Link className="btn-primary shrink-0" href="/#events">
             Find an event <ArrowRight size={17} />
           </Link>
         </div>
