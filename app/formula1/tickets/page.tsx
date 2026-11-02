@@ -12,6 +12,7 @@ import { isSupportedCurrency } from '../../../lib/currency';
 import FootballDisplayPrice from '../../../components/FootballDisplayPrice';
 import SupplierTestCartButton from '../../../components/SupplierTestCartButton';
 import SupplierVenueMap from '../../../components/SupplierVenueMap';
+import Formula1OfferSelector from '../../../components/Formula1OfferSelector';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -508,8 +509,8 @@ export default async function Formula1TicketsPage({
                 returned for this Grand Prix.
               </div>
             ) : (
-              <div className="mt-6 grid gap-6 lg:grid-cols-2">
-                {tickets.map(
+              <Formula1OfferSelector
+                offers={tickets.map(
                   (
                     {
                       ticket,
@@ -539,9 +540,21 @@ export default async function Formula1TicketsPage({
                       sellingPrice !== null
                     );
 
-                    return (
+                    const categoryName =
+                      ticket.category_name?.trim() ||
+                      ticket.ticket_title?.trim() ||
+                      'Other ticket categories';
+
+                    const categoryKey = ticket.category_id?.trim()
+                      ? `category:${ticket.category_id.trim()}`
+                      : `name:${categoryName.toLocaleLowerCase('en-GB')}`;
+
+                    return {
+                      id: ticket.ticket_id || `offer-${index}`,
+                      categoryKey,
+                      categoryName,
+                      content: (
                       <article
-                        key={ticket.ticket_id || index}
                         className="rounded-2xl border bg-white p-6 shadow-sm"
                       >
                         <h3 className="text-xl font-black text-navy">
@@ -630,10 +643,11 @@ export default async function Formula1TicketsPage({
                           </p>
                         )}
                       </article>
-                    );
+                      ),
+                    };
                   }
                 )}
-              </div>
+              />
             )}
           </section>
 
