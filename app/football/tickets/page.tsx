@@ -464,6 +464,7 @@ export default async function FootballTicketsPage({
             <SupplierVenueMap
               venueId={event.venue_id}
               venueName={event.venue_name || 'Football stadium'}
+              mapType="stadium"
             />
           )}
 
