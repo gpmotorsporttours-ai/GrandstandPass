@@ -299,7 +299,7 @@ export default async function MotoGPTicketsPage({
           href="/sport/motogp"
           className="text-blue font-bold hover:underline"
         >
-          ‚Üê Back to MotoGP
+          {'\u2190'} Back to MotoGP
         </Link>
 
         <section className="mt-8 rounded-2xl border bg-white p-8 md:p-12">
@@ -315,7 +315,7 @@ export default async function MotoGPTicketsPage({
           </p>
 
           <p className="muted mt-6 text-xs">
-            TEST DATA ‚Äî NOT FOR SALE.
+            TEST DATA {'\u2014'} NOT FOR SALE.
             No reservations or payments can be made.
             Checkout remains disabled.
           </p>
@@ -390,11 +390,11 @@ export default async function MotoGPTicketsPage({
         href="/sport/motogp"
         className="text-blue font-bold hover:underline"
       >
-        ‚Üê Back to MotoGP
+        {'\u2190'} Back to MotoGP
       </Link>
 
       <div className="mt-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-        <strong>TEST DATA ‚Äî NOT FOR SALE.</strong>{' '}
+        <strong>TEST DATA {'\u2014'} NOT FOR SALE.</strong>{' '}
         Ticket offers are for development only.
         No reservation or payment can be made.
         Checkout remains disabled.
@@ -535,7 +535,7 @@ export default async function MotoGPTicketsPage({
                           Reported availability:{' '}
                           {ticket.stock ?? 'Unknown'}{' '}
                           tickets
-                          {' ¬∑ '}
+                          {' · '}
                           Minimum order:{' '}
                           {ticket.min_order ?? 1}
                         </p>
@@ -618,7 +618,7 @@ export default async function MotoGPTicketsPage({
           </section>
 
           <p className="muted mt-8 text-xs">
-            Indicative prices include a ‚Ç¨5 handling
+            Indicative prices include a €5 handling
             allowance per ticket and 15% markup.
             Taxes, payment charges and other costs
             are not yet confirmed. Supplier availability
