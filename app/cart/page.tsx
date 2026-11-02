@@ -57,6 +57,9 @@ export default function CartPage() {
           if (!isValidPrice(item.price, item.currency)) throw new Error('Invalid price');
           const amount = item.price;
           const from = item.currency;
+          if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+            throw new Error('Invalid ticket price');
+          }
           let pricing: ConvertedPrice;
           if (from === displayCurrency) {
             pricing = { supplierAmount: amount, supplierCurrency: from, displayAmount: amount,
