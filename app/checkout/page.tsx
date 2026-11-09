@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -25,6 +25,13 @@ type CustomerDetails = {
   email: string;
   phone: string;
   country: string;
+};
+
+type TestOrderResult = {
+  ok?: boolean;
+  orderReference?: string;
+  status?: string;
+  error?: string;
 };
 
 const INITIAL_CUSTOMER: CustomerDetails = {
@@ -89,17 +96,31 @@ export default function CheckoutPage() {
   const [detailsReviewed, setDetailsReviewed] =
     useState(false);
 
-  const countries = useMemo(() => getCountries(), []);
+  const [submitting, setSubmitting] = useState(false);
+  const [orderReference, setOrderReference] =
+    useState<string | null>(null);
+  const [submitError, setSubmitError] =
+    useState<string | null>(null);
+
+  const requestIdRef = useRef<string | null>(null);
+  const submittingRef = useRef(false);
+
+  const countries = useMemo(getCountries, []);
 
   const updateCustomer = (
     field: keyof CustomerDetails,
     value: string
   ) => {
+    if (submittingRef.current || orderReference) return;
+
     setCustomer((current) => ({
       ...current,
       [field]: value,
     }));
+
     setDetailsReviewed(false);
+    setSubmitError(null);
+    requestIdRef.current = null;
   };
 
   const validPrices =
@@ -138,6 +159,20 @@ export default function CheckoutPage() {
       item.supplierEnvironment === 'test'
   );
 
+  const allTestTickets =
+    items.length > 0 &&
+    items.length <= 5 &&
+    items.every(
+      (item) =>
+        item.supplier === 'XS2Event' &&
+        item.supplierEnvironment === 'test' &&
+        typeof item.supplierTicketId === 'string' &&
+        item.supplierTicketId.length > 0 &&
+        Number.isInteger(item.quantity) &&
+        item.quantity >= 1 &&
+        item.quantity <= 10
+    );
+
   const detailsComplete =
     customer.firstName.trim().length > 0 &&
     customer.lastName.trim().length > 0 &&
@@ -147,9 +182,93 @@ export default function CheckoutPage() {
     customer.phone.trim().length >= 6 &&
     customer.country.length > 0;
 
+  const canSubmit =
+    detailsReviewed &&
+    detailsComplete &&
+    allTestTickets &&
+    !submitting &&
+    !orderReference;
+
   const reviewDetails = () => {
     if (detailsComplete && items.length > 0) {
       setDetailsReviewed(true);
+      setSubmitError(null);
+    }
+  };
+
+  const createTestOrder = async () => {
+    if (
+      !canSubmit ||
+      submittingRef.current ||
+      orderReference
+    ) {
+      return;
+    }
+
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError(null);
+
+    if (!requestIdRef.current) {
+      requestIdRef.current = crypto.randomUUID();
+    }
+
+    try {
+      const response = await fetch(
+        '/api/checkout/submit-test',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({
+            requestId: requestIdRef.current,
+            customer: {
+              firstName: customer.firstName.trim(),
+              lastName: customer.lastName.trim(),
+              email: customer.email.trim(),
+              phone: customer.phone.trim(),
+              country: customer.country.trim(),
+            },
+            items: items.map((item) => ({
+              eventId: item.eventId,
+              supplierTicketId: item.supplierTicketId,
+              supplier: item.supplier,
+              supplierEnvironment:
+                item.supplierEnvironment,
+              quantity: item.quantity,
+            })),
+          }),
+        }
+      );
+
+      const result: TestOrderResult =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ??
+            'Unable to create the test order.'
+        );
+      }
+
+      if (!result.ok || !result.orderReference) {
+        throw new Error(
+          'The server did not return an order reference.'
+        );
+      }
+
+      setOrderReference(result.orderReference);
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'An unexpected error occurred.'
+      );
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -194,9 +313,9 @@ export default function CheckoutPage() {
               Checkout development mode
             </p>
             <p className="text-sm text-navy mt-1">
-              This page is for testing only. No payments,
-              ticket reservations or supplier orders
-              will be processed.
+              TEST MODE ONLY. Use fictional customer
+              information. No payments, ticket reservations
+              or XS2Event supplier orders will be processed.
             </p>
           </div>
         </div>
@@ -226,10 +345,7 @@ export default function CheckoutPage() {
             <div className="lg:col-span-2 space-y-6">
               <section className="rounded-2xl border bg-white p-6 md:p-8">
                 <div className="flex items-center gap-3 mb-6">
-                  <Globe2
-                    size={23}
-                    className="text-blue"
-                  />
+                  <Globe2 size={23} className="text-blue" />
                   <h2 className="text-xl font-black text-navy">
                     Customer Information
                   </h2>
@@ -245,8 +361,8 @@ export default function CheckoutPage() {
                     </label>
                     <input
                       id="firstName"
-                      autoComplete="given-name"
                       value={customer.firstName}
+                      disabled={submitting || !!orderReference}
                       onChange={(event) =>
                         updateCustomer(
                           'firstName',
@@ -254,7 +370,7 @@ export default function CheckoutPage() {
                         )
                       }
                       className="w-full rounded-xl border px-4 py-3"
-                      placeholder="First name"
+                      placeholder="Test"
                     />
                   </div>
 
@@ -267,8 +383,8 @@ export default function CheckoutPage() {
                     </label>
                     <input
                       id="lastName"
-                      autoComplete="family-name"
                       value={customer.lastName}
+                      disabled={submitting || !!orderReference}
                       onChange={(event) =>
                         updateCustomer(
                           'lastName',
@@ -276,7 +392,7 @@ export default function CheckoutPage() {
                         )
                       }
                       className="w-full rounded-xl border px-4 py-3"
-                      placeholder="Last name"
+                      placeholder="Customer"
                     />
                   </div>
 
@@ -290,8 +406,8 @@ export default function CheckoutPage() {
                     <input
                       id="email"
                       type="email"
-                      autoComplete="email"
                       value={customer.email}
+                      disabled={submitting || !!orderReference}
                       onChange={(event) =>
                         updateCustomer(
                           'email',
@@ -299,7 +415,7 @@ export default function CheckoutPage() {
                         )
                       }
                       className="w-full rounded-xl border px-4 py-3"
-                      placeholder="name@example.com"
+                      placeholder="test@example.com"
                     />
                   </div>
 
@@ -313,8 +429,8 @@ export default function CheckoutPage() {
                     <input
                       id="phone"
                       type="tel"
-                      autoComplete="tel"
                       value={customer.phone}
+                      disabled={submitting || !!orderReference}
                       onChange={(event) =>
                         updateCustomer(
                           'phone',
@@ -322,11 +438,8 @@ export default function CheckoutPage() {
                         )
                       }
                       className="w-full rounded-xl border px-4 py-3"
-                      placeholder="+27 82 123 4567"
+                      placeholder="+27 00 000 0000"
                     />
-                    <p className="text-xs muted mt-2">
-                      Include your international dialling code.
-                    </p>
                   </div>
 
                   <div className="md:col-span-2">
@@ -338,8 +451,8 @@ export default function CheckoutPage() {
                     </label>
                     <select
                       id="country"
-                      autoComplete="country-name"
                       value={customer.country}
+                      disabled={submitting || !!orderReference}
                       onChange={(event) =>
                         updateCustomer(
                           'country',
@@ -352,7 +465,10 @@ export default function CheckoutPage() {
                         Select your country
                       </option>
                       {countries.map((country) => (
-                        <option key={country} value={country}>
+                        <option
+                          key={country}
+                          value={country}
+                        >
                           {country}
                         </option>
                       ))}
@@ -363,7 +479,11 @@ export default function CheckoutPage() {
                 <div className="mt-7 border-t pt-6">
                   <button
                     type="button"
-                    disabled={!detailsComplete}
+                    disabled={
+                      !detailsComplete ||
+                      submitting ||
+                      !!orderReference
+                    }
                     onClick={reviewDetails}
                     className="rounded-xl bg-navy px-6 py-3 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -380,9 +500,8 @@ export default function CheckoutPage() {
                         className="text-green-700 shrink-0"
                       />
                       <p className="text-sm text-green-900">
-                        Customer details reviewed locally.
-                        No information has been submitted
-                        or saved to a server.
+                        Customer details reviewed.
+                        You can now create a test draft.
                       </p>
                     </div>
                   )}
@@ -391,10 +510,7 @@ export default function CheckoutPage() {
 
               <section className="rounded-2xl border bg-white p-6 md:p-8">
                 <div className="flex items-center gap-3 mb-5">
-                  <Ticket
-                    size={23}
-                    className="text-blue"
-                  />
+                  <Ticket size={23} className="text-blue" />
                   <h2 className="text-xl font-black text-navy">
                     Your Ticket Selections
                   </h2>
@@ -458,9 +574,7 @@ export default function CheckoutPage() {
 
               <div className="mt-5 space-y-3 border-b pb-5 text-sm">
                 <div className="flex justify-between gap-3">
-                  <span className="muted">
-                    Total tickets
-                  </span>
+                  <span className="muted">Total tickets</span>
                   <span className="font-bold text-navy">
                     {itemCount}
                   </span>
@@ -492,13 +606,10 @@ export default function CheckoutPage() {
                     : 'Final pricing pending'}
                 </p>
 
-                {originalTotal === null && (
-                  <p className="text-xs muted mt-2">
-                    Tickets may have different original
-                    currencies. A final checkout total
-                    will be calculated securely later.
-                  </p>
-                )}
+                <p className="text-xs muted mt-2">
+                  Display only. Test drafts are saved
+                  with a payable amount of zero.
+                </p>
               </div>
 
               {hasTestTickets && (
@@ -508,16 +619,57 @@ export default function CheckoutPage() {
                 </p>
               )}
 
-              <div className="mt-6">
-                <button
-                  type="button"
-                  disabled
-                  className="w-full rounded-xl bg-navy py-4 font-bold text-white opacity-60 cursor-not-allowed flex items-center justify-center gap-2"
+              {!allTestTickets && (
+                <p className="mt-4 text-sm text-amber-900">
+                  Test checkout supports 1–5 XS2Event
+                  test ticket selections only.
+                </p>
+              )}
+
+              {orderReference ? (
+                <div
+                  role="status"
+                  className="mt-6 rounded-xl border border-green-300 bg-green-50 p-4"
                 >
-                  <CreditCard size={19} />
-                  Payment Coming Soon
-                </button>
-              </div>
+                  <div className="flex items-center gap-2 text-green-800 font-bold">
+                    <CheckCircle2 size={20} />
+                    Test Draft Created
+                  </div>
+                  <p className="text-sm mt-3 text-green-900">
+                    Order reference:
+                  </p>
+                  <p className="font-black text-navy break-all mt-1">
+                    {orderReference}
+                  </p>
+                  <p className="text-xs text-green-900 mt-3">
+                    Saved in Supabase. No payment
+                    collected or supplier order placed.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    disabled={!canSubmit}
+                    onClick={createTestOrder}
+                    className="w-full rounded-xl bg-navy py-4 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <CreditCard size={19} />
+                    {submitting
+                      ? 'Creating Test Order...'
+                      : 'Create Test Order'}
+                  </button>
+                </div>
+              )}
+
+              {submitError && (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                >
+                  {submitError}
+                </div>
+              )}
 
               <p className="text-xs muted text-center mt-4">
                 No payment will be collected and no
