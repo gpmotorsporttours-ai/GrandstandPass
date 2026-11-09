@@ -86,7 +86,7 @@ async function loadEvents(): Promise<ApiResult> {
     );
 
     const results = await Promise.all(
-      pageNumbers.map(async page => {
+      pageNumbers.map(async (page) => {
         try {
           const params = new URLSearchParams({
             sport_type: 'formula1',
@@ -107,7 +107,19 @@ async function loadEvents(): Promise<ApiResult> {
               : [],
             failed: false,
           };
-        } catch {
+        } catch (error) {
+          // Diagnostic logging for Vercel server logs.
+          // Never log API keys or supplier response bodies.
+          console.error(
+            '[Formula 1 XS2Event test inventory]',
+            'Page:',
+            page,
+            'Error:',
+            error instanceof Error
+              ? error.message
+              : 'Unknown error'
+          );
+
           return {
             page,
             events: [] as SupplierEvent[],
@@ -152,7 +164,7 @@ async function loadEvents(): Promise<ApiResult> {
         b.date_start || ''
       )
     )
-    .map(event => ({
+    .map((event) => ({
       event_id: event.event_id,
       event_name: event.event_name,
       date_start: event.date_start,
