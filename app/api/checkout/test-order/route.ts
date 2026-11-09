@@ -1,6 +1,8 @@
 
 import 'server-only';
 
+// Grandstand Pass checkout testing - Preview deployment.
+
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
@@ -25,7 +27,10 @@ type TestItem = {
   quantity: number;
 };
 
-function validText(value: unknown, max = 150): value is string {
+function validText(
+  value: unknown,
+  max = 150
+): value is string {
   return (
     typeof value === 'string' &&
     value.trim().length > 0 &&
@@ -34,15 +39,17 @@ function validText(value: unknown, max = 150): value is string {
 }
 
 export async function POST(request: NextRequest) {
-  // Disabled unless explicitly enabled in Vercel.
-  if (process.env.TEST_ORDER_CREATION_ENABLED !== 'true') {
+  // Test orders must be explicitly enabled.
+  if (
+    process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
+  ) {
     return NextResponse.json(
       { error: 'Test order creation is disabled.' },
       { status: 404 }
     );
   }
 
-  // Never enable this endpoint for production.
+  // Never allow test-order creation in Production.
   if (process.env.VERCEL_ENV === 'production') {
     return NextResponse.json(
       { error: 'Test orders are unavailable in production.' },
@@ -50,6 +57,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Require a same-origin browser request.
   const origin = request.headers.get('origin');
   const expectedOrigin = request.nextUrl.origin;
 
@@ -83,9 +91,11 @@ export async function POST(request: NextRequest) {
   }
 
   const data = body as Record<string, unknown>;
+
   const customer = data.customer as
     | Record<string, unknown>
     | undefined;
+
   const items = data.items;
 
   if (
@@ -95,12 +105,16 @@ export async function POST(request: NextRequest) {
     !validText(customer.firstName, 100) ||
     !validText(customer.lastName, 100) ||
     !validText(customer.email, 254) ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email) ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      customer.email
+    ) ||
     !validText(customer.phone, 40) ||
     !validText(customer.country, 100)
   ) {
     return NextResponse.json(
-      { error: 'Please provide valid customer details.' },
+      {
+        error: 'Please provide valid customer details.',
+      },
       { status: 400 }
     );
   }
@@ -163,34 +177,49 @@ export async function POST(request: NextRequest) {
   };
 
   const orderReference =
-    `GP-TEST-${randomUUID().slice(0, 12).toUpperCase()}`;
+    `GP-TEST-${randomUUID()
+      .slice(0, 12)
+      .toUpperCase()}`;
 
   try {
     const supabase = getSupabaseAdmin();
 
-    const { error } = await supabase.from('orders').insert({
-      order_reference: orderReference,
-      customer_first_name: cleanCustomer.firstName,
-      customer_last_name: cleanCustomer.lastName,
-      customer_email: cleanCustomer.email,
-      customer_phone: cleanCustomer.phone,
-      customer_country: cleanCustomer.country,
-      currency: 'EUR',
-      total_amount_minor: 0,
-      order_status: 'test_draft',
-      payment_provider: 'simulation',
-      items: validatedItems.map((item) => ({
-        ...item,
-        testOnly: true,
-        priceVerified: false,
-        availabilityVerified: false,
-      })),
-    });
+    const { error } = await supabase
+      .from('orders')
+      .insert({
+        order_reference: orderReference,
+        customer_first_name:
+          cleanCustomer.firstName,
+        customer_last_name:
+          cleanCustomer.lastName,
+        customer_email:
+          cleanCustomer.email,
+        customer_phone:
+          cleanCustomer.phone,
+        customer_country:
+          cleanCustomer.country,
+        currency: 'EUR',
+        total_amount_minor: 0,
+        order_status: 'test_draft',
+        payment_provider: 'simulation',
+        items: validatedItems.map((item) => ({
+          ...item,
+          testOnly: true,
+          priceVerified: false,
+          availabilityVerified: false,
+        })),
+      });
 
     if (error) {
-      console.error('Test order database error:', error.code);
+      console.error(
+        'Test order database error:',
+        error.code
+      );
+
       return NextResponse.json(
-        { error: 'Unable to save the test order.' },
+        {
+          error: 'Unable to save the test order.',
+        },
         { status: 500 }
       );
     }
@@ -200,14 +229,21 @@ export async function POST(request: NextRequest) {
         ok: true,
         orderReference,
         status: 'test_draft',
-        message: 'Test draft saved. No payment or supplier order created.',
+        message:
+          'Test draft saved. No payment or supplier order created.',
       },
       { status: 201 }
     );
   } catch (error) {
-    console.error('Test order creation failed:', error);
+    console.error(
+      'Test order creation failed:',
+      error
+    );
+
     return NextResponse.json(
-      { error: 'Unable to create the test order.' },
+      {
+        error: 'Unable to create the test order.',
+      },
       { status: 500 }
     );
   }
