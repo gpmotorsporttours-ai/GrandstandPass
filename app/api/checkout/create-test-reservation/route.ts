@@ -10,6 +10,16 @@ export const dynamic = 'force-dynamic';
 
 const ORDER_REFERENCE_PATTERN = /^GP-TEST-[A-F0-9]{12}$/;
 
+type TestOrder = {
+  order_reference: string;
+  order_status: string;
+  payment_provider: string;
+  total_amount_minor: number;
+  supplier_order_reference: string | null;
+  supplier_reservation_id: string | null;
+  supplier_reservation_attempt_id: string | null;
+};
+
 function fail(message: string, status: number) {
   return NextResponse.json(
     { ok: false, error: message },
@@ -72,7 +82,11 @@ export async function POST(request: NextRequest) {
     return fail('Invalid JSON.', 400);
   }
 
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    Array.isArray(body)
+  ) {
     return fail('Invalid request.', 400);
   }
 
@@ -88,41 +102,57 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
 
-    const { data: order, error } = await supabase
+    // Select all columns to avoid the Supabase
+    // GenericStringError caused by the typed select expression.
+    const { data, error } = await supabase
       .from('orders')
-      .select(
-        'order_reference, order_status, payment_provider, ' +
-        'total_amount_minor, supplier_order_reference, ' +
-        'supplier_reservation_id, supplier_reservation_attempt_id'
-      )
+      .select('*')
       .eq('order_reference', orderReference)
       .maybeSingle();
 
     if (error) {
-      console.error('Reservation validation database error:', error.code);
+      console.error(
+        'Reservation validation database error:',
+        error.code
+      );
+
       return fail('Unable to validate test order.', 500);
     }
 
-    if (!order) {
+    if (!data) {
       return fail('Test order not found.', 404);
     }
 
+    const order = data as TestOrder;
+
+    // Require confirmed simulated payment.
+    // Never accept an unpaid or real-payment order.
     if (
       order.order_status !== 'payment_confirmed' ||
       order.payment_provider !== 'simulation' ||
       order.total_amount_minor !== 0
     ) {
-      return fail('Order is not eligible for test reservation.', 409);
+      return fail(
+        'Order is not eligible for test reservation.',
+        409
+      );
     }
 
+    // Prevent proceeding when supplier processing
+    // has already been recorded.
     if (
       order.supplier_order_reference ||
       order.supplier_reservation_id ||
       order.supplier_reservation_attempt_id
     ) {
-      return fail('Order already has supplier processing recorded.', 409);
+      return fail(
+        'Order already has supplier processing recorded.',
+        409
+      );
     }
 
+    // Validation only.
+    // No database updates or XS2Event requests.
     return NextResponse.json(
       {
         ok: true,
@@ -130,7 +160,9 @@ export async function POST(request: NextRequest) {
         eligible: true,
         mode: 'validation_only',
         message:
-          'Order passed initial eligibility checks. No reservation attempt was claimed and no XS2Event request was made.',
+          'Order passed initial eligibility checks. ' +
+          'No reservation attempt was claimed and ' +
+          'no XS2Event request was made.',
       },
       {
         headers: { 'Cache-Control': 'no-store' },
@@ -138,6 +170,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error('Reservation validation error:', error);
+
     return fail('Unable to validate test order.', 500);
   }
 }
