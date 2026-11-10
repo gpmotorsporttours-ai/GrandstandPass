@@ -31,7 +31,7 @@ function fail(message: string, status: number) {
 }
 
 export async function POST(request: NextRequest) {
-  // Preview-only. Never allow this endpoint in production.
+  // Never enable this endpoint in production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
     return fail('Test reservation endpoint is disabled.', 404);
   }
 
+  // Require the private test-order secret.
   const expectedSecret = process.env.TEST_ORDER_ACCESS_SECRET;
   const providedSecret = request.headers.get('x-test-order-secret');
 
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
     return fail('Unauthorized.', 401);
   }
 
+  // Accept JSON requests only.
   if (
     !(request.headers.get('content-type') ?? '')
       .toLowerCase()
@@ -102,8 +104,7 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
 
-    // Select all columns to avoid the Supabase
-    // GenericStringError caused by the typed select expression.
+    // Read the order and check initial eligibility.
     const { data, error } = await supabase
       .from('orders')
       .select('*')
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error(
-        'Reservation validation database error:',
+        'Reservation claim database read error:',
         error.code
       );
 
@@ -125,8 +126,7 @@ export async function POST(request: NextRequest) {
 
     const order = data as TestOrder;
 
-    // Require confirmed simulated payment.
-    // Never accept an unpaid or real-payment order.
+    // Only zero-value simulated-payment test orders qualify.
     if (
       order.order_status !== 'payment_confirmed' ||
       order.payment_provider !== 'simulation' ||
@@ -138,8 +138,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Prevent proceeding when supplier processing
-    // has already been recorded.
+    // Reject orders with existing supplier processing.
     if (
       order.supplier_order_reference ||
       order.supplier_reservation_id ||
@@ -151,26 +150,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validation only.
-    // No database updates or XS2Event requests.
+    // Atomically claim this order in Supabase.
+    // The database function rechecks all eligibility
+    // conditions within the UPDATE operation.
+    const { data: attemptId, error: claimError } =
+      await supabase.rpc(
+        'claim_test_reservation_attempt',
+        {
+          p_order_reference: orderReference,
+        }
+      );
+
+    if (claimError) {
+      console.error(
+        'Reservation claim RPC error:',
+        claimError.code
+      );
+
+      return fail('Unable to claim test reservation.', 500);
+    }
+
+    // Null means another request claimed the order,
+    // or the order became ineligible.
+    if (
+      typeof attemptId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        attemptId
+      )
+    ) {
+      return fail(
+        'Order is no longer eligible or has already been claimed.',
+        409
+      );
+    }
+
+    // No XS2Event API call is made.
     return NextResponse.json(
       {
         ok: true,
         orderReference,
-        eligible: true,
-        mode: 'validation_only',
+        claimed: true,
+        mode: 'claim_only',
+        attemptId,
         message:
-          'Order passed initial eligibility checks. ' +
-          'No reservation attempt was claimed and ' +
-          'no XS2Event request was made.',
+          'Test reservation attempt claimed successfully. ' +
+          'No XS2Event reservation was created.',
       },
       {
         headers: { 'Cache-Control': 'no-store' },
       }
     );
   } catch (error) {
-    console.error('Reservation validation error:', error);
+    console.error('Reservation claim error:', error);
 
-    return fail('Unable to validate test order.', 500);
+    return fail('Unable to claim test reservation.', 500);
   }
 }
