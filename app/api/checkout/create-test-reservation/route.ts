@@ -43,7 +43,7 @@ function fail(message: string, status: number) {
 }
 
 export async function POST(request: NextRequest) {
-  // Test environment only.
+  // Never enable this endpoint in production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     return fail('Test reservation endpoint is disabled.', 404);
   }
 
-  // Authenticate the internal request.
+  // Require the private test-order secret.
   const expectedSecret = process.env.TEST_ORDER_ACCESS_SECRET;
   const providedSecret = request.headers.get('x-test-order-secret');
 
@@ -73,6 +73,7 @@ export async function POST(request: NextRequest) {
     return fail('Unauthorized.', 401);
   }
 
+  // Accept JSON requests only.
   if (
     !(request.headers.get('content-type') ?? '')
       .toLowerCase()
@@ -115,19 +116,18 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
 
-    // Retrieve the order from the database.
+    // Retrieve the order from Supabase.
+    // Using select('*') avoids the Supabase
+    // TypeScript parser error.
     const { data, error } = await supabase
       .from('orders')
-      .select(
-        'order_reference, order_status, payment_provider, ' +
-        'total_amount_minor, supplier_order_reference, ' +
-        'supplier_reservation_id, supplier_reservation_attempt_id, items'
-      )
+      .select('*')
       .eq('order_reference', orderReference)
       .maybeSingle();
 
     if (error) {
       console.error('Test order read error:', error.code);
+
       return fail('Unable to validate test order.', 500);
     }
 
@@ -137,8 +137,8 @@ export async function POST(request: NextRequest) {
 
     const order = data as TestOrder;
 
-    // A simulated zero-value payment is valid only
-    // for this controlled TEST workflow.
+    // Only zero-value simulated-payment
+    // test orders qualify.
     if (
       order.order_status !== 'payment_confirmed' ||
       order.payment_provider !== 'simulation' ||
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Never process an order twice.
+    // Reject orders with existing supplier processing.
     if (
       order.supplier_order_reference ||
       order.supplier_reservation_id ||
@@ -162,8 +162,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // For this initial integration test, accept exactly
-    // one test ticket line.
+    // For this controlled integration test,
+    // accept exactly one test ticket item.
     if (
       !Array.isArray(order.items) ||
       order.items.length !== 1
@@ -196,9 +196,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify directly against XS2Event TEST inventory.
-    // Never trust availability or price flags
-    // previously stored in the browser or database.
+    // Perform a fresh, read-only verification
+    // against XS2Event TEST inventory.
+    //
+    // Never trust previously stored availability
+    // or pricing flags.
     let verification;
 
     try {
@@ -219,6 +221,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Stop if the supplier verification fails.
+    // Do not claim the order.
     if (!verification.ok) {
       return NextResponse.json(
         {
@@ -236,9 +240,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only after successful supplier verification,
-    // atomically claim the test order.
-    // The database function must recheck eligibility.
+    // Supplier verification passed.
+    //
+    // Atomically claim the order in Supabase.
+    // The database function must recheck
+    // all eligibility conditions.
     const { data: attemptId, error: claimError } =
       await supabase.rpc(
         'claim_test_reservation_attempt',
@@ -256,18 +262,21 @@ export async function POST(request: NextRequest) {
       return fail('Unable to claim test reservation.', 500);
     }
 
+    // Reject a missing or invalid claim result.
     if (
       typeof attemptId !== 'string' ||
       !UUID_PATTERN.test(attemptId)
     ) {
       return fail(
-        'Order is no longer eligible or was already claimed.',
+        'Order is no longer eligible or has already been claimed.',
         409
       );
     }
 
-    // Deliberately stop before creating a supplier
-    // reservation or booking.
+    // Deliberately stop here.
+    //
+    // No XS2Event reservation or booking
+    // request is made.
     return NextResponse.json(
       {
         ok: true,
