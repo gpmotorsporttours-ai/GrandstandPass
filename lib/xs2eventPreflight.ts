@@ -1,3 +1,4 @@
+
 import 'server-only';
 
 import { xs2eventGet } from './xs2event';
@@ -45,6 +46,12 @@ export type PreflightResult = {
   pairsOnly?: boolean;
   supplierCurrency?: string;
   supplierNetRateValid?: boolean;
+
+  // Supplier net rate in minor currency units.
+  // For example, 12500 means EUR 125.00
+  // when supplierCurrency is EUR.
+  supplierNetRateMinor?: number;
+
   diagnostics: PreflightDiagnostics;
 };
 
@@ -54,14 +61,22 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
 
 /**
  * Read-only XS2Event TEST inventory verification.
- * Does not reserve, book, charge, or guarantee price/availability.
- * Diagnostic output is intended only for the existing secret-protected
- * internal preflight route, never a public cart/browser endpoint.
+ *
+ * Checks ticket availability, stock, minimum order,
+ * pairs-only restrictions, currency and supplier price.
+ *
+ * Does not reserve, book, charge, or guarantee
+ * price or availability.
+ *
+ * Supplier net rates are commercially sensitive.
+ * Results must remain server-side or within
+ * secret-protected internal diagnostic endpoints.
  */
 export async function preflightXS2EventTicket(
   input: PreflightInput
 ): Promise<PreflightResult> {
   const checkedAt = new Date().toISOString();
+
   const diagnostics: PreflightDiagnostics = {
     pagesChecked: 0,
     ticketsReturned: 0,
@@ -90,16 +105,27 @@ export async function preflightXS2EventTicket(
     diagnostics: { ...diagnostics },
   });
 
-  if (!SAFE_ID.test(input.eventId) || !SAFE_ID.test(input.ticketId)) {
-    return fail('INVALID_ID', 'A valid event ID and ticket ID are required.');
+  // Validate supplier identifiers.
+  if (
+    !SAFE_ID.test(input.eventId) ||
+    !SAFE_ID.test(input.ticketId)
+  ) {
+    return fail(
+      'INVALID_ID',
+      'A valid event ID and ticket ID are required.'
+    );
   }
 
+  // Validate requested quantity.
   if (
     !Number.isSafeInteger(input.quantity) ||
     input.quantity < 1 ||
     input.quantity > 10
   ) {
-    return fail('INVALID_QUANTITY', 'Quantity must be a whole number between 1 and 10.');
+    return fail(
+      'INVALID_QUANTITY',
+      'Quantity must be a whole number between 1 and 10.'
+    );
   }
 
   let found: SupplierTicket | undefined;
@@ -107,6 +133,7 @@ export async function preflightXS2EventTicket(
   let sawMatchingEvent = false;
   let sawMissingEvent = false;
 
+  // Search the available supplier ticket pages.
   for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
       event_id: input.eventId,
@@ -116,91 +143,183 @@ export async function preflightXS2EventTicket(
       page: String(page),
     });
 
-    const data = await xs2eventGet<TicketList>(`/tickets?${params.toString()}`);
-    const tickets = Array.isArray(data.tickets) ? data.tickets : [];
+    const data = await xs2eventGet<TicketList>(
+      `/tickets?${params.toString()}`
+    );
+
+    const tickets = Array.isArray(data.tickets)
+      ? data.tickets
+      : [];
 
     diagnostics.pagesChecked += 1;
     diagnostics.ticketsReturned += tickets.length;
 
     for (const ticket of tickets) {
-      if (ticket.ticket_id !== input.ticketId) continue;
+      if (ticket.ticket_id !== input.ticketId) {
+        continue;
+      }
+
       sawMatchingId = true;
       diagnostics.matchingTicketCount += 1;
-      if (ticket.event_id === input.eventId) sawMatchingEvent = true;
-      if (ticket.event_id == null) sawMissingEvent = true;
 
-      // Preserve the current lookup rule: accept an exact event match,
-      // or a missing event_id when the supplier event filter was used.
-      // Reject any explicitly different event ID.
+      if (ticket.event_id === input.eventId) {
+        sawMatchingEvent = true;
+      }
+
+      if (ticket.event_id == null) {
+        sawMissingEvent = true;
+      }
+
+      // Accept an exact event match or a missing
+      // event ID when the supplier event filter
+      // was used.
+      //
+      // Reject an explicitly different event ID.
       if (
         !found &&
-        (ticket.event_id == null || ticket.event_id === input.eventId)
+        (
+          ticket.event_id == null ||
+          ticket.event_id === input.eventId
+        )
       ) {
         found = ticket;
       }
     }
 
     diagnostics.requestedTicketPresent = sawMatchingId;
+
     diagnostics.matchingEventId = sawMatchingId
-      ? sawMatchingEvent ? true : sawMissingEvent ? null : false
+      ? sawMatchingEvent
+        ? true
+        : sawMissingEvent
+          ? null
+          : false
       : null;
 
-    if (found) break;
-    if (tickets.length < PAGE_SIZE || !data.pagination?.next_page) break;
+    if (found) {
+      break;
+    }
+
+    if (
+      tickets.length < PAGE_SIZE ||
+      !data.pagination?.next_page
+    ) {
+      break;
+    }
   }
 
   if (!found) {
     return fail(
-      sawMatchingId ? 'EVENT_MISMATCH' : 'TICKET_NOT_FOUND',
+      sawMatchingId
+        ? 'EVENT_MISMATCH'
+        : 'TICKET_NOT_FOUND',
       sawMatchingId
         ? 'Ticket ID was returned, but its supplier event ID does not match. No reservation was made.'
         : 'Ticket not found in the checked supplier pages. No reservation was made.'
     );
   }
 
+  // Extract supplier ticket details.
   const stock = found.stock;
   const minOrder = found.min_order ?? 1;
   const pairsOnly = found.options?.pairs_only === true;
   const currency = found.currency_code;
+
+  // Supplier net_rate is expressed in minor units.
+  // Example: 12500 = EUR 125.00.
   const netRateValid =
     typeof found.net_rate === 'number' &&
     Number.isSafeInteger(found.net_rate) &&
     found.net_rate > 0;
 
+  // Preserve the exact supplier amount.
+  // Never calculate this amount from browser
+  // cart prices or customer-submitted values.
+  const supplierNetRateMinor = netRateValid
+    ? found.net_rate!
+    : undefined;
+
   const details = {
-    availableStock: typeof stock === 'number' ? stock : undefined,
+    availableStock:
+      typeof stock === 'number'
+        ? stock
+        : undefined,
     minimumOrder: minOrder,
     pairsOnly,
     supplierCurrency: currency,
     supplierNetRateValid: netRateValid,
+    supplierNetRateMinor,
   };
 
+  // Ticket must be marked available.
   if (found.ticket_status !== 'available') {
-    return fail('UNAVAILABLE', 'Supplier ticket is not marked available.', details);
+    return fail(
+      'UNAVAILABLE',
+      'Supplier ticket is not marked available.',
+      details
+    );
   }
 
-  if (!Number.isSafeInteger(stock) || (stock as number) < input.quantity) {
-    return fail('INSUFFICIENT_STOCK', 'Supplier stock is insufficient or unknown.', details);
+  // Supplier must have sufficient stock.
+  if (
+    !Number.isSafeInteger(stock) ||
+    (stock as number) < input.quantity
+  ) {
+    return fail(
+      'INSUFFICIENT_STOCK',
+      'Supplier stock is insufficient or unknown.',
+      details
+    );
   }
 
-  if (!Number.isSafeInteger(minOrder) || minOrder < 1 || input.quantity < minOrder) {
-    return fail('MINIMUM_ORDER', 'Quantity does not meet the supplier minimum order.', details);
+  // Respect minimum order requirements.
+  if (
+    !Number.isSafeInteger(minOrder) ||
+    minOrder < 1 ||
+    input.quantity < minOrder
+  ) {
+    return fail(
+      'MINIMUM_ORDER',
+      'Quantity does not meet the supplier minimum order.',
+      details
+    );
   }
 
-  if (pairsOnly && input.quantity % 2 !== 0) {
-    return fail('PAIRS_ONLY', 'This ticket must be ordered in pairs.', details);
+  // Some supplier tickets must be purchased
+  // in pairs.
+  if (
+    pairsOnly &&
+    input.quantity % 2 !== 0
+  ) {
+    return fail(
+      'PAIRS_ONLY',
+      'This ticket must be ordered in pairs.',
+      details
+    );
   }
 
-  if (!['EUR', 'GBP'].includes(currency ?? '') || !netRateValid) {
-    return fail('INVALID_SUPPLIER_PRICE', 'Supplier currency or net rate is not usable.', details);
+  // Only supported currencies and valid
+  // supplier net rates are accepted.
+  if (
+    !['EUR', 'GBP'].includes(currency ?? '') ||
+    !netRateValid
+  ) {
+    return fail(
+      'INVALID_SUPPLIER_PRICE',
+      'Supplier currency or net rate is not usable.',
+      details
+    );
   }
 
+  // All verification checks passed.
   return {
     ...base,
     ...details,
     ok: true,
     code: 'PREFLIGHT_PASSED',
-    message: 'Latest supplier ticket checks passed. This is not a reservation or price guarantee.',
+    message:
+      'Latest supplier ticket checks passed. ' +
+      'This is not a reservation or price guarantee.',
     diagnostics: { ...diagnostics },
   };
 }
