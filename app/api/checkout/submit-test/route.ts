@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
 
 const MAX_BODY_BYTES = 12000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -19,8 +20,23 @@ type TestItem = {
   supplierTicketId: string;
   quantity: number;
   testOnly: true;
-  priceVerified: boolean;
-  availabilityVerified: boolean;
+  priceVerified: true;
+  availabilityVerified: true;
+
+  // Supplier pricing snapshot.
+  supplierCurrency: 'EUR';
+  supplierNetRateMinor: number;
+  supplierTotalNetMinor: number;
+
+  // Indicative customer pricing snapshot.
+  indicativeUnitAmountMinor: number;
+  indicativeTotalAmountMinor: number;
+  indicativeCurrency: 'EUR';
+
+  // Verification metadata.
+  priceVerifiedAt: string;
+  customerPriceConfirmed: false;
+  finalPriceGuaranteed: false;
 };
 
 function fail(message: string, status: number) {
@@ -33,7 +49,10 @@ function fail(message: string, status: number) {
   );
 }
 
-function validText(value: unknown, max: number): value is string {
+function validText(
+  value: unknown,
+  max: number
+): value is string {
   return (
     typeof value === 'string' &&
     value.trim().length > 0 &&
@@ -42,7 +61,7 @@ function validText(value: unknown, max: number): value is string {
 }
 
 export async function POST(request: NextRequest) {
-  // Preview environment only. Never enabled in production.
+  // Preview only. Never enabled in production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
@@ -50,7 +69,7 @@ export async function POST(request: NextRequest) {
     return fail('Test checkout is disabled.', 404);
   }
 
-  // Vercel Deployment Protection must remain enabled.
+  // Deployment Protection must remain enabled.
   if (
     request.headers.get('origin') !==
     request.nextUrl.origin
@@ -71,7 +90,10 @@ export async function POST(request: NextRequest) {
   try {
     const raw = await request.text();
 
-    if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+    if (
+      Buffer.byteLength(raw, 'utf8') >
+      MAX_BODY_BYTES
+    ) {
       return fail('Request too large.', 413);
     }
 
@@ -120,7 +142,8 @@ export async function POST(request: NextRequest) {
     return fail('Invalid customer details.', 400);
   }
 
-  // For this stage, test one supplier ticket at a time.
+  // For this stage, verify one supplier
+  // ticket selection at a time.
   if (
     !Array.isArray(data.items) ||
     data.items.length !== 1
@@ -161,11 +184,10 @@ export async function POST(request: NextRequest) {
   const ticketId = item.supplierTicketId;
   const quantity = item.quantity as number;
 
-  // Fresh read-only supplier verification.
-  // This never creates a supplier reservation.
-  let verifiedAt: string;
+  let verifiedItem: TestItem;
 
   try {
+    // Fresh read-only supplier verification.
     const preflight = await preflightXS2EventTicket({
       eventId,
       ticketId,
@@ -176,7 +198,9 @@ export async function POST(request: NextRequest) {
       !preflight.ok ||
       preflight.supplierNetRateValid !== true ||
       preflight.supplierCurrency !== 'EUR' ||
-      !Number.isSafeInteger(preflight.supplierNetRateMinor) ||
+      !Number.isSafeInteger(
+        preflight.supplierNetRateMinor
+      ) ||
       (preflight.supplierNetRateMinor ?? 0) <= 0
     ) {
       return fail(
@@ -185,38 +209,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const supplierNetRateMinor =
+      preflight.supplierNetRateMinor as number;
+
+    const supplierTotalNetMinor =
+      supplierNetRateMinor * quantity;
+
+    if (
+      !Number.isSafeInteger(
+        supplierTotalNetMinor
+      )
+    ) {
+      return fail(
+        'Invalid supplier total.',
+        422
+      );
+    }
+
+    // Apply existing Grandstand Pass pricing:
+    // EUR 5 handling per ticket, then 15% markup.
     const pricing = calculateSupplierTicketPrice({
-      netRateMinor: preflight.supplierNetRateMinor!,
+      netRateMinor: supplierNetRateMinor,
       supplierCurrency: 'EUR',
     });
 
     if (!pricing) {
       return fail(
-        'Unable to calculate the indicative ticket price.',
+        'Unable to calculate indicative pricing.',
         422
       );
     }
 
-    const unitAmountMinor = Math.round(
-      pricing.indicativeSellingPrice * 100
-    );
+    const indicativeUnitAmountMinor =
+      Math.round(
+        pricing.indicativeSellingPrice * 100
+      );
 
-    const totalAmountMinor = unitAmountMinor * quantity;
+    const indicativeTotalAmountMinor =
+      indicativeUnitAmountMinor * quantity;
 
     if (
-      !Number.isSafeInteger(unitAmountMinor) ||
-      unitAmountMinor <= 0 ||
-      !Number.isSafeInteger(totalAmountMinor) ||
-      totalAmountMinor <= 0
+      !Number.isSafeInteger(
+        indicativeUnitAmountMinor
+      ) ||
+      indicativeUnitAmountMinor <= 0 ||
+      !Number.isSafeInteger(
+        indicativeTotalAmountMinor
+      ) ||
+      indicativeTotalAmountMinor <= 0
     ) {
-      return fail('Invalid calculated ticket price.', 422);
+      return fail(
+        'Invalid calculated ticket price.',
+        422
+      );
     }
 
-    verifiedAt = preflight.checkedAt;
+    // Store the supplier-verified price snapshot.
+    // This is NOT an accepted final customer quote.
+    verifiedItem = {
+      eventId,
+      supplierTicketId: ticketId,
+      quantity,
+      testOnly: true,
+
+      priceVerified: true,
+      availabilityVerified: true,
+
+      supplierCurrency: 'EUR',
+      supplierNetRateMinor,
+      supplierTotalNetMinor,
+
+      indicativeUnitAmountMinor,
+      indicativeTotalAmountMinor,
+      indicativeCurrency: 'EUR',
+
+      priceVerifiedAt: preflight.checkedAt,
+
+      customerPriceConfirmed: false,
+      finalPriceGuaranteed: false,
+    };
   } catch (error) {
     console.error(
       'Test checkout supplier verification error:',
-      error instanceof Error ? error.name : 'Unknown'
+      error instanceof Error
+        ? error.name
+        : 'Unknown'
     );
 
     return fail(
@@ -224,17 +301,6 @@ export async function POST(request: NextRequest) {
       502
     );
   }
-
-  const validatedItems: TestItem[] = [
-    {
-      eventId,
-      supplierTicketId: ticketId,
-      quantity,
-      testOnly: true,
-      priceVerified: true,
-      availabilityVerified: true,
-    },
-  ];
 
   const orderReference =
     `GP-TEST-${data.requestId
@@ -250,21 +316,25 @@ export async function POST(request: NextRequest) {
       .insert({
         test_request_id: data.requestId,
         order_reference: orderReference,
+
         customer_first_name: c.firstName.trim(),
         customer_last_name: c.lastName.trim(),
-        customer_email: c.email.trim().toLowerCase(),
+        customer_email: c.email
+          .trim()
+          .toLowerCase(),
         customer_phone: c.phone.trim(),
         customer_country: c.country.trim(),
 
-        // Preserve zero-value simulated checkout.
-        // The verified indicative price is NOT
-        // a confirmed payable amount.
+        // Keep the simulated payable amount at zero.
+        // The indicative selling price is stored
+        // separately inside the order's items JSON.
         currency: 'EUR',
         total_amount_minor: 0,
+
         order_status: 'test_draft',
         payment_provider: 'simulation',
 
-        items: validatedItems,
+        items: [verifiedItem],
       });
 
     if (error) {
@@ -280,7 +350,10 @@ export async function POST(request: NextRequest) {
         error.code
       );
 
-      return fail('Unable to save test order.', 500);
+      return fail(
+        'Unable to save test order.',
+        500
+      );
     }
 
     return NextResponse.json(
@@ -288,28 +361,48 @@ export async function POST(request: NextRequest) {
         ok: true,
         orderReference,
         status: 'test_draft',
+
         supplierVerified: true,
         priceVerified: true,
         availabilityVerified: true,
-        verifiedAt,
+
+        // Customer-facing indicative pricing only.
+        indicativeCurrency: 'EUR',
+        indicativeUnitAmountMinor:
+          verifiedItem.indicativeUnitAmountMinor,
+        indicativeTotalAmountMinor:
+          verifiedItem.indicativeTotalAmountMinor,
+
+        priceVerifiedAt:
+          verifiedItem.priceVerifiedAt,
+
         customerPriceConfirmed: false,
+        finalPriceGuaranteed: false,
         paymentCreated: false,
         reservationCreated: false,
+
         message:
-          'Test draft saved after supplier verification. ' +
+          'Test draft saved with verified indicative pricing. ' +
           'No payment or XS2Event reservation was created.',
       },
       {
         status: 201,
-        headers: { 'Cache-Control': 'no-store' },
+        headers: {
+          'Cache-Control': 'no-store',
+        },
       }
     );
   } catch (error) {
     console.error(
       'Test checkout error:',
-      error instanceof Error ? error.name : 'Unknown'
+      error instanceof Error
+        ? error.name
+        : 'Unknown'
     );
 
-    return fail('Unable to save test order.', 500);
+    return fail(
+      'Unable to save test order.',
+      500
+    );
   }
 }
