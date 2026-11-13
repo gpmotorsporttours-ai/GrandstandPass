@@ -9,10 +9,12 @@ import {
   CreditCard,
   Globe2,
   LockKeyhole,
+  RefreshCw,
   ShieldCheck,
   ShoppingCart,
   Ticket,
 } from 'lucide-react';
+
 import { useCart } from '../../components/CartProvider';
 import {
   formatCurrency,
@@ -25,6 +27,16 @@ type CustomerDetails = {
   email: string;
   phone: string;
   country: string;
+};
+
+type VerifiedQuote = {
+  currency: 'EUR';
+  indicativeUnitAmountMinor: number;
+  indicativeTotalAmountMinor: number;
+  checkedAt: string;
+  eventId: string;
+  ticketId: string;
+  quantity: number;
 };
 
 type TestOrderResult = {
@@ -41,6 +53,8 @@ const INITIAL_CUSTOMER: CustomerDetails = {
   phone: '',
   country: '',
 };
+
+const QUOTE_VALIDITY_MS = 5 * 60 * 1000;
 
 function getCountries(): string[] {
   try {
@@ -96,14 +110,31 @@ export default function CheckoutPage() {
   const [detailsReviewed, setDetailsReviewed] =
     useState(false);
 
+  const [verifying, setVerifying] = useState(false);
+
+  const [verifiedQuote, setVerifiedQuote] =
+    useState<VerifiedQuote | null>(null);
+
+  const [quoteSignature, setQuoteSignature] =
+    useState<string | null>(null);
+
+  const [priceAccepted, setPriceAccepted] =
+    useState(false);
+
+  const [verificationError, setVerificationError] =
+    useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
+
   const [orderReference, setOrderReference] =
     useState<string | null>(null);
+
   const [submitError, setSubmitError] =
     useState<string | null>(null);
 
   const requestIdRef = useRef<string | null>(null);
   const submittingRef = useRef(false);
+  const verifyingRef = useRef(false);
 
   const countries = useMemo(getCountries, []);
 
@@ -111,7 +142,9 @@ export default function CheckoutPage() {
     field: keyof CustomerDetails,
     value: string
   ) => {
-    if (submittingRef.current || orderReference) return;
+    if (submittingRef.current || orderReference) {
+      return;
+    }
 
     setCustomer((current) => ({
       ...current,
@@ -160,8 +193,7 @@ export default function CheckoutPage() {
   );
 
   const allTestTickets =
-    items.length > 0 &&
-    items.length <= 5 &&
+    items.length === 1 &&
     items.every(
       (item) =>
         item.supplier === 'XS2Event' &&
@@ -172,6 +204,30 @@ export default function CheckoutPage() {
         item.quantity >= 1 &&
         item.quantity <= 10
     );
+
+  const ticketSignature = JSON.stringify(
+    items.map((item) => [
+      item.eventId,
+      item.supplierTicketId,
+      item.quantity,
+      item.supplier,
+      item.supplierEnvironment,
+    ])
+  );
+
+  const quoteMatchesSelection =
+    verifiedQuote !== null &&
+    quoteSignature === ticketSignature;
+
+  const quoteNotExpired =
+    verifiedQuote !== null &&
+    Number.isFinite(Date.parse(verifiedQuote.checkedAt)) &&
+    Date.now() - Date.parse(verifiedQuote.checkedAt) >= 0 &&
+    Date.now() - Date.parse(verifiedQuote.checkedAt) <
+      QUOTE_VALIDITY_MS;
+
+  const quoteIsCurrent =
+    quoteMatchesSelection && quoteNotExpired;
 
   const detailsComplete =
     customer.firstName.trim().length > 0 &&
@@ -186,8 +242,98 @@ export default function CheckoutPage() {
     detailsReviewed &&
     detailsComplete &&
     allTestTickets &&
+    quoteIsCurrent &&
+    priceAccepted &&
+    !verifying &&
     !submitting &&
     !orderReference;
+
+  const verifyTicketPrice = async () => {
+    if (
+      verifyingRef.current ||
+      submittingRef.current ||
+      orderReference ||
+      !allTestTickets
+    ) {
+      return;
+    }
+
+    verifyingRef.current = true;
+    setVerifying(true);
+    setVerifiedQuote(null);
+    setQuoteSignature(null);
+    setPriceAccepted(false);
+    setVerificationError(null);
+    setSubmitError(null);
+
+    try {
+      const item = items[0];
+
+      const response = await fetch(
+        '/api/checkout/verify-test-price',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({
+            eventId: item.eventId,
+            ticketId: item.supplierTicketId,
+            quantity: item.quantity,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || result.ok !== true) {
+        throw new Error(
+          result.error ??
+            'Unable to verify the ticket price.'
+        );
+      }
+
+      if (
+        result.currency !== 'EUR' ||
+        !Number.isSafeInteger(
+          result.indicativeUnitAmountMinor
+        ) ||
+        !Number.isSafeInteger(
+          result.indicativeTotalAmountMinor
+        ) ||
+        result.indicativeTotalAmountMinor <= 0 ||
+        typeof result.checkedAt !== 'string'
+      ) {
+        throw new Error(
+          'The server returned invalid pricing.'
+        );
+      }
+
+      setVerifiedQuote({
+        currency: 'EUR',
+        indicativeUnitAmountMinor:
+          result.indicativeUnitAmountMinor,
+        indicativeTotalAmountMinor:
+          result.indicativeTotalAmountMinor,
+        checkedAt: result.checkedAt,
+        eventId: item.eventId,
+        ticketId: item.supplierTicketId,
+        quantity: item.quantity,
+      });
+
+      setQuoteSignature(ticketSignature);
+    } catch (error) {
+      setVerificationError(
+        error instanceof Error
+          ? error.message
+          : 'Price verification failed.'
+      );
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
+    }
+  };
 
   const reviewDetails = () => {
     if (detailsComplete && items.length > 0) {
@@ -199,6 +345,9 @@ export default function CheckoutPage() {
   const createTestOrder = async () => {
     if (
       !canSubmit ||
+      !verifiedQuote ||
+      Date.now() - Date.parse(verifiedQuote.checkedAt) >=
+        QUOTE_VALIDITY_MS ||
       submittingRef.current ||
       orderReference
     ) {
@@ -289,16 +438,20 @@ export default function CheckoutPage() {
       <section className="container-wide py-10 md:py-14">
         <div className="flex items-start gap-4 mb-8">
           <div className="rounded-2xl bg-ice p-3">
-            <Globe2 size={28} className="text-blue" />
+            <Globe2
+              size={28}
+              className="text-blue"
+            />
           </div>
 
           <div>
             <h1 className="text-3xl md:text-4xl font-black text-navy">
               International Checkout
             </h1>
+
             <p className="muted mt-2">
-              Complete your customer details and review
-              your ticket selections.
+              Complete your customer details and
+              review your ticket selections.
             </p>
           </div>
         </div>
@@ -308,10 +461,12 @@ export default function CheckoutPage() {
             size={20}
             className="text-blue shrink-0"
           />
+
           <div>
             <p className="font-bold text-navy">
               Checkout development mode
             </p>
+
             <p className="text-sm text-navy mt-1">
               TEST MODE ONLY. Use fictional customer
               information. No payments, ticket reservations
@@ -326,13 +481,16 @@ export default function CheckoutPage() {
               size={44}
               className="mx-auto text-blue mb-4"
             />
+
             <h2 className="text-2xl font-black text-navy">
               Your shopping cart is empty
             </h2>
+
             <p className="muted mt-3 mb-6">
               Please select your tickets before
               proceeding to checkout.
             </p>
+
             <Link
               href="/"
               className="inline-flex rounded-xl bg-navy px-7 py-4 text-white font-bold"
@@ -345,7 +503,11 @@ export default function CheckoutPage() {
             <div className="lg:col-span-2 space-y-6">
               <section className="rounded-2xl border bg-white p-6 md:p-8">
                 <div className="flex items-center gap-3 mb-6">
-                  <Globe2 size={23} className="text-blue" />
+                  <Globe2
+                    size={23}
+                    className="text-blue"
+                  />
+
                   <h2 className="text-xl font-black text-navy">
                     Customer Information
                   </h2>
@@ -359,10 +521,13 @@ export default function CheckoutPage() {
                     >
                       First name
                     </label>
+
                     <input
                       id="firstName"
                       value={customer.firstName}
-                      disabled={submitting || !!orderReference}
+                      disabled={
+                        submitting || !!orderReference
+                      }
                       onChange={(event) =>
                         updateCustomer(
                           'firstName',
@@ -381,10 +546,13 @@ export default function CheckoutPage() {
                     >
                       Last name
                     </label>
+
                     <input
                       id="lastName"
                       value={customer.lastName}
-                      disabled={submitting || !!orderReference}
+                      disabled={
+                        submitting || !!orderReference
+                      }
                       onChange={(event) =>
                         updateCustomer(
                           'lastName',
@@ -403,11 +571,14 @@ export default function CheckoutPage() {
                     >
                       Email address
                     </label>
+
                     <input
                       id="email"
                       type="email"
                       value={customer.email}
-                      disabled={submitting || !!orderReference}
+                      disabled={
+                        submitting || !!orderReference
+                      }
                       onChange={(event) =>
                         updateCustomer(
                           'email',
@@ -426,11 +597,14 @@ export default function CheckoutPage() {
                     >
                       Telephone number
                     </label>
+
                     <input
                       id="phone"
                       type="tel"
                       value={customer.phone}
-                      disabled={submitting || !!orderReference}
+                      disabled={
+                        submitting || !!orderReference
+                      }
                       onChange={(event) =>
                         updateCustomer(
                           'phone',
@@ -449,10 +623,13 @@ export default function CheckoutPage() {
                     >
                       Country of residence
                     </label>
+
                     <select
                       id="country"
                       value={customer.country}
-                      disabled={submitting || !!orderReference}
+                      disabled={
+                        submitting || !!orderReference
+                      }
                       onChange={(event) =>
                         updateCustomer(
                           'country',
@@ -464,6 +641,7 @@ export default function CheckoutPage() {
                       <option value="">
                         Select your country
                       </option>
+
                       {countries.map((country) => (
                         <option
                           key={country}
@@ -499,9 +677,11 @@ export default function CheckoutPage() {
                         size={20}
                         className="text-green-700 shrink-0"
                       />
+
                       <p className="text-sm text-green-900">
                         Customer details reviewed.
-                        You can now create a test draft.
+                        Please verify and acknowledge
+                        the indicative ticket price.
                       </p>
                     </div>
                   )}
@@ -510,7 +690,11 @@ export default function CheckoutPage() {
 
               <section className="rounded-2xl border bg-white p-6 md:p-8">
                 <div className="flex items-center gap-3 mb-5">
-                  <Ticket size={23} className="text-blue" />
+                  <Ticket
+                    size={23}
+                    className="text-blue"
+                  />
+
                   <h2 className="text-xl font-black text-navy">
                     Your Ticket Selections
                   </h2>
@@ -574,7 +758,10 @@ export default function CheckoutPage() {
 
               <div className="mt-5 space-y-3 border-b pb-5 text-sm">
                 <div className="flex justify-between gap-3">
-                  <span className="muted">Total tickets</span>
+                  <span className="muted">
+                    Total tickets
+                  </span>
+
                   <span className="font-bold text-navy">
                     {itemCount}
                   </span>
@@ -584,6 +771,7 @@ export default function CheckoutPage() {
                   <span className="muted">
                     Preferred display currency
                   </span>
+
                   <span className="font-bold text-navy">
                     {displayCurrency}
                   </span>
@@ -621,10 +809,109 @@ export default function CheckoutPage() {
 
               {!allTestTickets && (
                 <p className="mt-4 text-sm text-amber-900">
-                  Test checkout supports 1–5 XS2Event
-                  test ticket selections only.
+                  Test checkout currently supports
+                  exactly one XS2Event test ticket
+                  selection.
                 </p>
               )}
+
+              <section className="mt-6 rounded-xl border bg-white p-4 space-y-3">
+                <h3 className="font-black text-navy">
+                  Verify Ticket Price
+                </h3>
+
+                <p className="text-sm muted">
+                  Check the latest indicative price
+                  with XS2Event before creating a
+                  test order. Availability is not reserved.
+                </p>
+
+                <button
+                  type="button"
+                  disabled={
+                    verifying ||
+                    submitting ||
+                    !!orderReference ||
+                    !allTestTickets
+                  }
+                  onClick={verifyTicketPrice}
+                  className="w-full rounded-xl border border-navy px-4 py-3 font-bold text-navy disabled:opacity-50"
+                >
+                  <RefreshCw
+                    size={16}
+                    className="inline mr-2"
+                  />
+
+                  {verifying
+                    ? 'Verifying...'
+                    : 'Verify Ticket Price'}
+                </button>
+
+                {verificationError && (
+                  <p
+                    role="alert"
+                    className="text-sm text-red-700"
+                  >
+                    {verificationError}
+                  </p>
+                )}
+
+                {quoteIsCurrent && verifiedQuote && (
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-4 space-y-3">
+                    <p className="font-bold text-green-900">
+                      Supplier price checked
+                    </p>
+
+                    <p className="text-2xl font-black text-navy">
+                      {formatCurrency(
+                        verifiedQuote.indicativeTotalAmountMinor / 100,
+                        'EUR'
+                      )}
+                    </p>
+
+                    <p className="text-xs text-green-900">
+                      Indicative total for{' '}
+                      {verifiedQuote.quantity} ticket(s),
+                      checked at{' '}
+                      {new Date(
+                        verifiedQuote.checkedAt
+                      ).toLocaleString()}.
+                      Not a guaranteed final price.
+                      Taxes and payment fees may apply.
+                    </p>
+
+                    {!orderReference && (
+                      <label className="flex items-start gap-3 text-sm text-navy cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={priceAccepted}
+                          onChange={(event) =>
+                            setPriceAccepted(
+                              event.target.checked
+                            )
+                          }
+                          className="mt-1"
+                        />
+
+                        <span>
+                          I acknowledge this verified
+                          indicative price for testing.
+                          This does not authorise a
+                          payment or reservation.
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                {verifiedQuote && !quoteIsCurrent && (
+                  <p className="text-sm text-amber-900">
+                    The quote has expired or your
+                    ticket selection has changed.
+                    Please verify the price again.
+                  </p>
+                )}
+              </section>
 
               {orderReference ? (
                 <div
@@ -635,12 +922,15 @@ export default function CheckoutPage() {
                     <CheckCircle2 size={20} />
                     Test Draft Created
                   </div>
+
                   <p className="text-sm mt-3 text-green-900">
                     Order reference:
                   </p>
+
                   <p className="font-black text-navy break-all mt-1">
                     {orderReference}
                   </p>
+
                   <p className="text-xs text-green-900 mt-3">
                     Saved in Supabase. No payment
                     collected or supplier order placed.
@@ -655,6 +945,7 @@ export default function CheckoutPage() {
                     className="w-full rounded-xl bg-navy py-4 font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <CreditCard size={19} />
+
                     {submitting
                       ? 'Creating Test Order...'
                       : 'Create Test Order'}
