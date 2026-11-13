@@ -73,13 +73,25 @@ function secretMatches(
   );
 }
 
+function formatMoney(
+  minorUnits: number,
+  currency: string
+): string {
+  return new Intl.NumberFormat('en-IE', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(minorUnits / 100);
+}
+
 export async function POST(request: NextRequest) {
   // Preview-only internal diagnostic.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.XS2EVENT_PREFLIGHT_ENABLED !== 'true'
   ) {
-    return fail('Reservation draft test is disabled.', 404);
+    return fail('Reservation preview is disabled.', 404);
   }
 
   const secret = process.env.XS2EVENT_PREFLIGHT_SECRET;
@@ -135,8 +147,6 @@ export async function POST(request: NextRequest) {
     return fail('Invalid test order reference.', 400);
   }
 
-  // Use a diagnostic email only.
-  // This is not submitted to XS2Event.
   if (
     typeof bookingEmail !== 'string' ||
     bookingEmail.length > 254 ||
@@ -150,7 +160,6 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
 
-    // Read the existing test order.
     const { data, error } = await supabase
       .from('orders')
       .select('*')
@@ -159,7 +168,7 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error(
-        'Reservation draft order read error:',
+        'Reservation preview order read error:',
         error.code
       );
 
@@ -172,28 +181,22 @@ export async function POST(request: NextRequest) {
 
     const order = data as TestOrder;
 
-    // Only simulated, zero-value,
-    // payment-confirmed test orders.
     if (
       order.order_status !== 'payment_confirmed' ||
       order.payment_provider !== 'simulation' ||
       order.total_amount_minor !== 0
     ) {
-      return fail(
-        'Test order is not eligible.',
-        409
-      );
+      return fail('Test order is not eligible.', 409);
     }
 
-    // Unlike the claim endpoint, this diagnostic
-    // may inspect an already-claimed test order.
-    // It never modifies the claim.
+    // Allow an existing claim for read-only inspection.
+    // Never create or modify a claim here.
     if (
       order.supplier_order_reference ||
       order.supplier_reservation_id
     ) {
       return fail(
-        'Test order already has a supplier reservation or order.',
+        'Test order already has supplier processing.',
         409
       );
     }
@@ -231,7 +234,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Fresh supplier availability and pricing.
+    // Fresh read-only XS2Event TEST verification.
     const preflight =
       await preflightXS2EventTicket({
         eventId: ticket.eventId,
@@ -251,8 +254,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Independently retrieve the individual
-    // ticket detail from XS2Event TEST.
     const detail =
       await xs2eventGet<SupplierTicketDetail>(
         `/tickets/${encodeURIComponent(
@@ -270,9 +271,7 @@ export async function POST(request: NextRequest) {
       typeof detail.stock !== 'number' ||
       !Number.isSafeInteger(detail.stock) ||
       detail.stock < ticket.quantity ||
-      !Number.isSafeInteger(
-        detail.min_order ?? 1
-      ) ||
+      !Number.isSafeInteger(detail.min_order ?? 1) ||
       (detail.min_order ?? 1) < 1 ||
       ticket.quantity < (detail.min_order ?? 1) ||
       (
@@ -285,13 +284,11 @@ export async function POST(request: NextRequest) {
         preflight.supplierNetRateMinor
     ) {
       return fail(
-        'Individual supplier ticket details do not match preflight.',
+        'Supplier ticket details do not match preflight.',
         422
       );
     }
 
-    // Construct a validated draft using
-    // supplier-derived net rate and currency.
     const result =
       validateXS2EventReservationDraft({
         ticketId: ticket.supplierTicketId,
@@ -305,27 +302,82 @@ export async function POST(request: NextRequest) {
         orderReference,
       });
 
-    if (!result.ok) {
-      return fail(result.message, 422);
+    if (
+      !result.ok ||
+      !result.totals ||
+      !result.indicativePricing
+    ) {
+      return fail(
+        result.message ||
+          'Reservation pricing validation failed.',
+        422
+      );
     }
+
+    const pricing = result.indicativePricing;
+    const currency = pricing.currency;
+
+    // Display-only preview.
+    // Do not construct or submit a supplier
+    // reservation payload containing sales_price.
+    const reservationPreview = {
+      orderReference,
+      eventId: ticket.eventId,
+      ticketId: ticket.supplierTicketId,
+      quantity: ticket.quantity,
+      currency,
+
+      supplierUnitNet: formatMoney(
+        pricing.supplierUnitNetMinor,
+        currency
+      ),
+
+      supplierTotalNet: formatMoney(
+        result.totals.supplierTotalNetMinor,
+        currency
+      ),
+
+      handlingPerTicket: formatMoney(
+        pricing.handlingUnitMinor,
+        currency
+      ),
+
+      markupPerTicket: formatMoney(
+        pricing.markupUnitMinor,
+        currency
+      ),
+
+      indicativeSellingUnit: formatMoney(
+        pricing.sellingUnitMinor,
+        currency
+      ),
+
+      indicativeSellingTotal: formatMoney(
+        pricing.sellingTotalMinor,
+        currency
+      ),
+
+      markupPercent: pricing.markupPercent,
+      availableStock: detail.stock,
+      supplierVerified: true,
+      simulatedPaymentConfirmed: true,
+      customerPriceConfirmed: false,
+      readyForSupplierSubmission: false,
+      reservationCreated: false,
+    };
 
     return NextResponse.json(
       {
         ok: true,
-        mode: 'reservation_draft_validation',
-        orderReference,
-        paymentVerified: true,
-        supplierPreflightPassed: true,
-        supplierTicketDetailVerified: true,
-        alreadyClaimed:
-          Boolean(
-            order.supplier_reservation_attempt_id
-          ),
+        mode: 'reservation_preview',
+        reservationPreview,
         validation: result,
-        reservationCreated: false,
+        alreadyClaimed: Boolean(
+          order.supplier_reservation_attempt_id
+        ),
         message:
-          'Reservation draft validated. ' +
-          'No XS2Event reservation was created.',
+          'Read-only reservation preview generated. ' +
+          'No supplier reservation was created.',
       },
       {
         headers: { 'Cache-Control': 'no-store' },
@@ -333,14 +385,14 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error(
-      'Reservation draft validation error:',
+      'Reservation preview error:',
       error instanceof Error
         ? error.name
         : 'Unknown'
     );
 
     return fail(
-      'Reservation draft validation unavailable.',
+      'Reservation preview unavailable.',
       502
     );
   }
