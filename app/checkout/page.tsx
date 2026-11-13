@@ -46,6 +46,15 @@ type TestOrderResult = {
   error?: string;
 };
 
+type PriceVerificationResult = {
+  ok?: boolean;
+  error?: string;
+  currency?: string;
+  indicativeUnitAmountMinor?: number;
+  indicativeTotalAmountMinor?: number;
+  checkedAt?: string;
+};
+
 const INITIAL_CUSTOMER: CustomerDetails = {
   firstName: '',
   lastName: '',
@@ -269,6 +278,20 @@ export default function CheckoutPage() {
     try {
       const item = items[0];
 
+      // Validate and narrow the optional ticket ID
+      // before using it as a required string.
+      const supplierTicketId =
+        item.supplierTicketId;
+
+      if (
+        typeof supplierTicketId !== 'string' ||
+        supplierTicketId.length === 0
+      ) {
+        throw new Error(
+          'A valid supplier ticket ID is required.'
+        );
+      }
+
       const response = await fetch(
         '/api/checkout/verify-test-price',
         {
@@ -279,13 +302,14 @@ export default function CheckoutPage() {
           cache: 'no-store',
           body: JSON.stringify({
             eventId: item.eventId,
-            ticketId: item.supplierTicketId,
+            ticketId: supplierTicketId,
             quantity: item.quantity,
           }),
         }
       );
 
-      const result = await response.json();
+      const result: PriceVerificationResult =
+        await response.json();
 
       if (!response.ok || result.ok !== true) {
         throw new Error(
@@ -294,16 +318,24 @@ export default function CheckoutPage() {
         );
       }
 
+      const unitAmount =
+        result.indicativeUnitAmountMinor;
+
+      const totalAmount =
+        result.indicativeTotalAmountMinor;
+
+      const checkedAt = result.checkedAt;
+
       if (
         result.currency !== 'EUR' ||
-        !Number.isSafeInteger(
-          result.indicativeUnitAmountMinor
-        ) ||
-        !Number.isSafeInteger(
-          result.indicativeTotalAmountMinor
-        ) ||
-        result.indicativeTotalAmountMinor <= 0 ||
-        typeof result.checkedAt !== 'string'
+        !Number.isSafeInteger(unitAmount) ||
+        typeof unitAmount !== 'number' ||
+        unitAmount <= 0 ||
+        !Number.isSafeInteger(totalAmount) ||
+        typeof totalAmount !== 'number' ||
+        totalAmount <= 0 ||
+        typeof checkedAt !== 'string' ||
+        !Number.isFinite(Date.parse(checkedAt))
       ) {
         throw new Error(
           'The server returned invalid pricing.'
@@ -312,13 +344,11 @@ export default function CheckoutPage() {
 
       setVerifiedQuote({
         currency: 'EUR',
-        indicativeUnitAmountMinor:
-          result.indicativeUnitAmountMinor,
-        indicativeTotalAmountMinor:
-          result.indicativeTotalAmountMinor,
-        checkedAt: result.checkedAt,
+        indicativeUnitAmountMinor: unitAmount,
+        indicativeTotalAmountMinor: totalAmount,
+        checkedAt,
         eventId: item.eventId,
-        ticketId: item.supplierTicketId,
+        ticketId: supplierTicketId,
         quantity: item.quantity,
       });
 
