@@ -3,6 +3,8 @@ import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import { preflightXS2EventTicket } from '../../../../lib/xs2eventPreflight';
+import { calculateSupplierTicketPrice } from '../../../../lib/supplierPricing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +13,15 @@ const MAX_BODY_BYTES = 12000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type TestItem = {
+  eventId: string;
+  supplierTicketId: string;
+  quantity: number;
+  testOnly: true;
+  priceVerified: boolean;
+  availabilityVerified: boolean;
+};
 
 function fail(message: string, status: number) {
   return NextResponse.json(
@@ -22,8 +33,16 @@ function fail(message: string, status: number) {
   );
 }
 
+function validText(value: unknown, max: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    value.trim().length <= max
+  );
+}
+
 export async function POST(request: NextRequest) {
-  // Only available in Vercel's protected Preview environment.
+  // Preview environment only. Never enabled in production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
@@ -31,8 +50,7 @@ export async function POST(request: NextRequest) {
     return fail('Test checkout is disabled.', 404);
   }
 
-  // Browser-origin protection. Vercel Deployment Protection
-  // must also remain enabled for this Preview deployment.
+  // Vercel Deployment Protection must remain enabled.
   if (
     request.headers.get('origin') !==
     request.nextUrl.origin
@@ -91,78 +109,132 @@ export async function POST(request: NextRequest) {
 
   const c = customer as Record<string, unknown>;
 
-  const validText = (value: unknown, max: number) =>
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    value.trim().length <= max;
-
   if (
     !validText(c.firstName, 100) ||
     !validText(c.lastName, 100) ||
     !validText(c.email, 254) ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      String(c.email)
-    ) ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email) ||
     !validText(c.phone, 40) ||
     !validText(c.country, 100)
   ) {
     return fail('Invalid customer details.', 400);
   }
 
+  // For this stage, test one supplier ticket at a time.
   if (
     !Array.isArray(data.items) ||
-    data.items.length < 1 ||
-    data.items.length > 5
+    data.items.length !== 1
   ) {
-    return fail('Invalid ticket selection.', 400);
+    return fail(
+      'Test checkout currently supports exactly one ticket selection.',
+      400
+    );
   }
 
-  const items = [];
-  const seen = new Set<string>();
+  const rawItem: unknown = data.items[0];
 
-  for (const value of data.items) {
-    if (
-      !value ||
-      typeof value !== 'object' ||
-      Array.isArray(value)
-    ) {
-      return fail('Invalid ticket.', 400);
-    }
+  if (
+    !rawItem ||
+    typeof rawItem !== 'object' ||
+    Array.isArray(rawItem)
+  ) {
+    return fail('Invalid ticket.', 400);
+  }
 
-    const item = value as Record<string, unknown>;
+  const item = rawItem as Record<string, unknown>;
 
-    if (
-      typeof item.eventId !== 'string' ||
-      !SAFE_ID.test(item.eventId) ||
-      typeof item.supplierTicketId !== 'string' ||
-      !SAFE_ID.test(item.supplierTicketId) ||
-      item.supplier !== 'XS2Event' ||
-      item.supplierEnvironment !== 'test' ||
-      !Number.isSafeInteger(item.quantity) ||
-      (item.quantity as number) < 1 ||
-      (item.quantity as number) > 10
-    ) {
-      return fail('Invalid XS2Event test ticket.', 400);
-    }
+  if (
+    typeof item.eventId !== 'string' ||
+    !SAFE_ID.test(item.eventId) ||
+    typeof item.supplierTicketId !== 'string' ||
+    !SAFE_ID.test(item.supplierTicketId) ||
+    item.supplier !== 'XS2Event' ||
+    item.supplierEnvironment !== 'test' ||
+    !Number.isSafeInteger(item.quantity) ||
+    (item.quantity as number) < 1 ||
+    (item.quantity as number) > 10
+  ) {
+    return fail('Invalid XS2Event test ticket.', 400);
+  }
 
-    const key =
-      `${item.eventId}:${item.supplierTicketId}`;
+  const eventId = item.eventId;
+  const ticketId = item.supplierTicketId;
+  const quantity = item.quantity as number;
 
-    if (seen.has(key)) {
-      return fail('Duplicate ticket selection.', 400);
-    }
+  // Fresh read-only supplier verification.
+  // This never creates a supplier reservation.
+  let verifiedAt: string;
 
-    seen.add(key);
-
-    items.push({
-      eventId: item.eventId,
-      supplierTicketId: item.supplierTicketId,
-      quantity: item.quantity,
-      testOnly: true,
-      priceVerified: false,
-      availabilityVerified: false,
+  try {
+    const preflight = await preflightXS2EventTicket({
+      eventId,
+      ticketId,
+      quantity,
     });
+
+    if (
+      !preflight.ok ||
+      preflight.supplierNetRateValid !== true ||
+      preflight.supplierCurrency !== 'EUR' ||
+      !Number.isSafeInteger(preflight.supplierNetRateMinor) ||
+      (preflight.supplierNetRateMinor ?? 0) <= 0
+    ) {
+      return fail(
+        'Ticket availability or supplier price could not be verified.',
+        422
+      );
+    }
+
+    const pricing = calculateSupplierTicketPrice({
+      netRateMinor: preflight.supplierNetRateMinor!,
+      supplierCurrency: 'EUR',
+    });
+
+    if (!pricing) {
+      return fail(
+        'Unable to calculate the indicative ticket price.',
+        422
+      );
+    }
+
+    const unitAmountMinor = Math.round(
+      pricing.indicativeSellingPrice * 100
+    );
+
+    const totalAmountMinor = unitAmountMinor * quantity;
+
+    if (
+      !Number.isSafeInteger(unitAmountMinor) ||
+      unitAmountMinor <= 0 ||
+      !Number.isSafeInteger(totalAmountMinor) ||
+      totalAmountMinor <= 0
+    ) {
+      return fail('Invalid calculated ticket price.', 422);
+    }
+
+    verifiedAt = preflight.checkedAt;
+  } catch (error) {
+    console.error(
+      'Test checkout supplier verification error:',
+      error instanceof Error ? error.name : 'Unknown'
+    );
+
+    return fail(
+      'Supplier verification is temporarily unavailable.',
+      502
+    );
   }
+
+  const validatedItems: TestItem[] = [
+    {
+      eventId,
+      supplierTicketId: ticketId,
+      quantity,
+      testOnly: true,
+      priceVerified: true,
+      availabilityVerified: true,
+    },
+  ];
 
   const orderReference =
     `GP-TEST-${data.requestId
@@ -178,18 +250,21 @@ export async function POST(request: NextRequest) {
       .insert({
         test_request_id: data.requestId,
         order_reference: orderReference,
-        customer_first_name: String(c.firstName).trim(),
-        customer_last_name: String(c.lastName).trim(),
-        customer_email: String(c.email)
-          .trim()
-          .toLowerCase(),
-        customer_phone: String(c.phone).trim(),
-        customer_country: String(c.country).trim(),
+        customer_first_name: c.firstName.trim(),
+        customer_last_name: c.lastName.trim(),
+        customer_email: c.email.trim().toLowerCase(),
+        customer_phone: c.phone.trim(),
+        customer_country: c.country.trim(),
+
+        // Preserve zero-value simulated checkout.
+        // The verified indicative price is NOT
+        // a confirmed payable amount.
         currency: 'EUR',
         total_amount_minor: 0,
         order_status: 'test_draft',
         payment_provider: 'simulation',
-        items,
+
+        items: validatedItems,
       });
 
     if (error) {
@@ -200,7 +275,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      console.error('Test checkout database error:', error.code);
+      console.error(
+        'Test checkout database error:',
+        error.code
+      );
 
       return fail('Unable to save test order.', 500);
     }
@@ -210,8 +288,16 @@ export async function POST(request: NextRequest) {
         ok: true,
         orderReference,
         status: 'test_draft',
+        supplierVerified: true,
+        priceVerified: true,
+        availabilityVerified: true,
+        verifiedAt,
+        customerPriceConfirmed: false,
+        paymentCreated: false,
+        reservationCreated: false,
         message:
-          'Test draft saved. No payment or XS2Event order created.',
+          'Test draft saved after supplier verification. ' +
+          'No payment or XS2Event reservation was created.',
       },
       {
         status: 201,
@@ -219,7 +305,11 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (error) {
-    console.error('Test checkout error:', error);
+    console.error(
+      'Test checkout error:',
+      error instanceof Error ? error.name : 'Unknown'
+    );
+
     return fail('Unable to save test order.', 500);
   }
 }
