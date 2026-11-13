@@ -11,6 +11,9 @@ export const dynamic = 'force-dynamic';
 const ORDER_REFERENCE_PATTERN =
   /^GP-TEST-[A-F0-9]{12}$/;
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 type TestOrder = {
   order_reference: string;
   order_status: string;
@@ -18,6 +21,7 @@ type TestOrder = {
   total_amount_minor: number;
   supplier_order_reference: string | null;
   supplier_reservation_id: string | null;
+  supplier_reservation_status: string | null;
   supplier_reservation_attempt_id: string | null;
 };
 
@@ -143,13 +147,17 @@ export async function POST(request: NextRequest) {
 
     const order = data as TestOrder;
 
-    // Only previously claimed, zero-value
-    // simulated-payment test orders qualify.
+    // Only claimed, zero-value simulated
+    // payment orders qualify.
     if (
       order.order_status !== 'payment_confirmed' ||
       order.payment_provider !== 'simulation' ||
       order.total_amount_minor !== 0 ||
-      !order.supplier_reservation_attempt_id
+      typeof order.supplier_reservation_attempt_id !==
+        'string' ||
+      !UUID_PATTERN.test(
+        order.supplier_reservation_attempt_id
+      )
     ) {
       return fail(
         'Test order is not eligible for simulation.',
@@ -157,33 +165,66 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Never simulate over a real supplier record.
+    // Never overwrite an existing supplier record
+    // or an already recorded simulation result.
     if (
       order.supplier_order_reference ||
-      order.supplier_reservation_id
+      order.supplier_reservation_id ||
+      order.supplier_reservation_status !== null
     ) {
       return fail(
-        'Order already has supplier processing.',
+        'Order already has a supplier result recorded.',
         409
       );
     }
 
-    // Construct a response only.
-    // No database writes or supplier API calls.
+    // Record the result atomically in Supabase.
+    // The database function repeats the eligibility
+    // checks and rejects duplicate processing.
+    const { data: recorded, error: recordError } =
+      await supabase.rpc(
+        'record_test_supplier_response',
+        {
+          p_order_reference: orderReference,
+          p_attempt_id:
+            order.supplier_reservation_attempt_id,
+          p_outcome: outcome,
+        }
+      );
+
+    if (recordError) {
+      console.error(
+        'Supplier simulation recording error:',
+        recordError.code
+      );
+
+      return fail(
+        'Unable to record simulated supplier response.',
+        500
+      );
+    }
+
+    if (recorded !== true) {
+      return fail(
+        'Supplier response already recorded or order is no longer eligible.',
+        409
+      );
+    }
+
     const simulated =
       outcome === 'success'
         ? {
             outcome: 'success',
             simulatedReservationId:
               `SIM-RES-${orderReference}`,
-            simulatedStatus: 'reserved',
+            simulatedStatus: 'simulated_reserved',
             customerMessage:
               'Test reservation accepted (simulation only).',
           }
         : {
             outcome: 'failure',
             simulatedReservationId: null,
-            simulatedStatus: 'rejected',
+            simulatedStatus: 'simulated_rejected',
             customerMessage:
               'Test reservation rejected (simulation only).',
           };
@@ -196,12 +237,12 @@ export async function POST(request: NextRequest) {
         attemptId:
           order.supplier_reservation_attempt_id,
         ...simulated,
-        databaseUpdated: false,
+        databaseUpdated: true,
         supplierContacted: false,
         reservationCreated: false,
         bookingCreated: false,
         message:
-          'Supplier response simulated successfully. ' +
+          'Simulated supplier response recorded in Supabase. ' +
           'No real reservation or booking was created.',
       },
       {
