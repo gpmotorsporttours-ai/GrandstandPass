@@ -39,13 +39,6 @@ type VerifiedQuote = {
   quantity: number;
 };
 
-type TestOrderResult = {
-  ok?: boolean;
-  orderReference?: string;
-  status?: string;
-  error?: string;
-};
-
 type PriceVerificationResult = {
   ok?: boolean;
   error?: string;
@@ -55,6 +48,16 @@ type PriceVerificationResult = {
   checkedAt?: string;
 };
 
+type TestOrderResult = {
+  ok?: boolean;
+  orderReference?: string;
+  status?: string;
+  customerPriceConfirmed?: boolean;
+  error?: string;
+};
+
+const QUOTE_VALIDITY_MS = 5 * 60 * 1000;
+
 const INITIAL_CUSTOMER: CustomerDetails = {
   firstName: '',
   lastName: '',
@@ -62,8 +65,6 @@ const INITIAL_CUSTOMER: CustomerDetails = {
   phone: '',
   country: '',
 };
-
-const QUOTE_VALIDITY_MS = 5 * 60 * 1000;
 
 function getCountries(): string[] {
   try {
@@ -274,12 +275,11 @@ export default function CheckoutPage() {
     setPriceAccepted(false);
     setVerificationError(null);
     setSubmitError(null);
+    requestIdRef.current = null;
 
     try {
       const item = items[0];
 
-      // Validate and narrow the optional ticket ID
-      // before using it as a required string.
       const supplierTicketId =
         item.supplierTicketId;
 
@@ -328,12 +328,13 @@ export default function CheckoutPage() {
 
       if (
         result.currency !== 'EUR' ||
-        !Number.isSafeInteger(unitAmount) ||
         typeof unitAmount !== 'number' ||
+        !Number.isSafeInteger(unitAmount) ||
         unitAmount <= 0 ||
-        !Number.isSafeInteger(totalAmount) ||
         typeof totalAmount !== 'number' ||
+        !Number.isSafeInteger(totalAmount) ||
         totalAmount <= 0 ||
+        totalAmount !== unitAmount * item.quantity ||
         typeof checkedAt !== 'string' ||
         !Number.isFinite(Date.parse(checkedAt))
       ) {
@@ -376,13 +377,30 @@ export default function CheckoutPage() {
     if (
       !canSubmit ||
       !verifiedQuote ||
-      Date.now() - Date.parse(verifiedQuote.checkedAt) >=
-        QUOTE_VALIDITY_MS ||
+      !quoteIsCurrent ||
+      !priceAccepted ||
       submittingRef.current ||
       orderReference
     ) {
       return;
     }
+
+    const quote = verifiedQuote;
+
+    // The server independently checks the acknowledged
+    // ticket, quantity and price before saving the order.
+    const priceAcknowledgement = {
+      accepted: true,
+      eventId: quote.eventId,
+      ticketId: quote.ticketId,
+      quantity: quote.quantity,
+      currency: quote.currency,
+      indicativeUnitAmountMinor:
+        quote.indicativeUnitAmountMinor,
+      indicativeTotalAmountMinor:
+        quote.indicativeTotalAmountMinor,
+      checkedAt: quote.checkedAt,
+    };
 
     submittingRef.current = true;
     setSubmitting(true);
@@ -403,6 +421,7 @@ export default function CheckoutPage() {
           cache: 'no-store',
           body: JSON.stringify({
             requestId: requestIdRef.current,
+
             customer: {
               firstName: customer.firstName.trim(),
               lastName: customer.lastName.trim(),
@@ -410,6 +429,7 @@ export default function CheckoutPage() {
               phone: customer.phone.trim(),
               country: customer.country.trim(),
             },
+
             items: items.map((item) => ({
               eventId: item.eventId,
               supplierTicketId: item.supplierTicketId,
@@ -418,6 +438,11 @@ export default function CheckoutPage() {
                 item.supplierEnvironment,
               quantity: item.quantity,
             })),
+
+            // Explicit customer acknowledgement.
+            // The server does not trust the amount
+            // without a fresh supplier price check.
+            priceAcknowledgement,
           }),
         }
       );
@@ -432,19 +457,37 @@ export default function CheckoutPage() {
         );
       }
 
-      if (!result.ok || !result.orderReference) {
+      if (
+        result.ok !== true ||
+        !result.orderReference ||
+        result.customerPriceConfirmed !== true
+      ) {
         throw new Error(
-          'The server did not return an order reference.'
+          'The server did not confirm the acknowledged test order.'
         );
       }
 
       setOrderReference(result.orderReference);
     } catch (error) {
-      setSubmitError(
+      const message =
         error instanceof Error
           ? error.message
-          : 'An unexpected error occurred.'
-      );
+          : 'An unexpected error occurred.';
+
+      setSubmitError(message);
+
+      // A rejected price acknowledgement must
+      // be reverified before another attempt.
+      if (
+        message.toLowerCase().includes('price') ||
+        message.toLowerCase().includes('acknowledg') ||
+        message.toLowerCase().includes('ticket selection')
+      ) {
+        setVerifiedQuote(null);
+        setQuoteSignature(null);
+        setPriceAccepted(false);
+        requestIdRef.current = null;
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -915,6 +958,7 @@ export default function CheckoutPage() {
                         <input
                           type="checkbox"
                           checked={priceAccepted}
+                          disabled={submitting}
                           onChange={(event) =>
                             setPriceAccepted(
                               event.target.checked
@@ -959,6 +1003,11 @@ export default function CheckoutPage() {
 
                   <p className="font-black text-navy break-all mt-1">
                     {orderReference}
+                  </p>
+
+                  <p className="text-sm text-green-900 mt-3">
+                    Customer price acknowledgement
+                    recorded with the test order.
                   </p>
 
                   <p className="text-xs text-green-900 mt-3">
