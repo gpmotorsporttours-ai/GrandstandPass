@@ -8,14 +8,15 @@ import {
 /**
  * XS2Event reservation draft validation.
  *
- * Calculates indicative customer prices using
- * the existing Grandstand Pass pricing rules.
+ * XS2Event confirmed that sales_price must
+ * equal net_rate. Both represent the supplier
+ * unit price, not the customer selling price.
  *
- * No supplier reservations, bookings,
- * payments or database writes occur here.
+ * Grandstand Pass calculates its own markup
+ * separately.
  *
- * sales_price is deliberately excluded until
- * its API semantics have been confirmed.
+ * This function does not contact XS2Event,
+ * process payments, or write to the database.
  */
 
 export type ReservationDraftInput = {
@@ -39,6 +40,7 @@ export type ReservationDraftResult = {
       ticket_id: string;
       quantity: number;
       net_rate: number;
+      sales_price: number;
       currency_code: string;
     }>;
     booking_email: string;
@@ -163,7 +165,7 @@ export function validateXS2EventReservationDraft(
     );
   }
 
-  // Reuse our established pricing rules:
+  // Existing Grandstand Pass pricing rules:
   // supplier net + EUR 5 handling allowance,
   // then 15% markup on the cost basis.
   const pricing = calculateSupplierTicketPrice({
@@ -227,7 +229,12 @@ export function validateXS2EventReservationDraft(
         {
           ticket_id: input.ticketId,
           quantity: input.quantity,
+
+          // Confirmed by XS2Event:
+          // sales_price equals net_rate.
           net_rate: input.supplierNetRateMinor,
+          sales_price: input.supplierNetRateMinor,
+
           currency_code: input.supplierCurrency,
         },
       ],
@@ -256,6 +263,7 @@ export function validateXS2EventReservationDraft(
       customerPriceConfirmed: false,
     },
 
+    // Explicitly prevent supplier submission.
     readyForSupplierSubmission: false,
   };
 }
