@@ -102,18 +102,25 @@ export async function POST(request: NextRequest) {
       .from('orders')
       .update({
         order_status: 'payment_confirmed',
+        payment_status: 'paid',
         payment_reference: paymentReference,
       })
       .eq('order_reference', data.orderReference)
       .eq('order_status', 'test_draft')
       .eq('payment_provider', 'simulation')
       .eq('total_amount_minor', 0)
+      .is('payment_status', null)
       .is('supplier_order_reference', null)
-      .select('order_reference, order_status, payment_reference')
+      .select(
+        'order_reference, order_status, payment_status, payment_reference'
+      )
       .maybeSingle();
 
     if (error) {
-      console.error('Payment simulation database error:', error.code);
+      console.error(
+        'Payment simulation database error:',
+        error.code
+      );
       return fail('Unable to simulate payment.', 500);
     }
 
@@ -129,6 +136,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         orderReference: updated.order_reference,
         status: updated.order_status,
+        paymentStatus: updated.payment_status,
         paymentReference: updated.payment_reference,
         message:
           'Payment simulated only. No money collected, invoice issued, or XS2Event order placed.',
