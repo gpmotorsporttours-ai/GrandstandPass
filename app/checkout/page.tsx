@@ -53,6 +53,8 @@ type TestOrderResult = {
   orderReference?: string;
   status?: string;
   customerPriceConfirmed?: boolean;
+  customerAccessToken?: string;
+  customerAccessTokenExpiresAt?: string;
   error?: string;
 };
 
@@ -141,6 +143,14 @@ export default function CheckoutPage() {
 
   const [submitError, setSubmitError] =
     useState<string | null>(null);
+
+  const [customerAccessToken, setCustomerAccessToken] =
+    useState<string | null>(null);
+
+  const [customerTokenExpiresAt, setCustomerTokenExpiresAt] =
+    useState<string | null>(null);
+
+  const [tokenCopied, setTokenCopied] = useState(false);
 
   const requestIdRef = useRef<string | null>(null);
   const submittingRef = useRef(false);
@@ -460,13 +470,23 @@ export default function CheckoutPage() {
       if (
         result.ok !== true ||
         !result.orderReference ||
-        result.customerPriceConfirmed !== true
+        result.customerPriceConfirmed !== true ||
+        typeof result.customerAccessToken !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(result.customerAccessToken) ||
+        typeof result.customerAccessTokenExpiresAt !== 'string' ||
+        !Number.isFinite(
+          Date.parse(result.customerAccessTokenExpiresAt)
+        )
       ) {
         throw new Error(
           'The server did not confirm the acknowledged test order.'
         );
       }
 
+      setCustomerAccessToken(result.customerAccessToken);
+      setCustomerTokenExpiresAt(
+        result.customerAccessTokenExpiresAt
+      );
       setOrderReference(result.orderReference);
     } catch (error) {
       const message =
@@ -1014,6 +1034,52 @@ export default function CheckoutPage() {
                     Saved in Supabase. No payment
                     collected or supplier order placed.
                   </p>
+
+                  {customerAccessToken && (
+                    <div className="mt-5 rounded-xl border border-green-200 bg-white p-3">
+                      <p className="text-sm font-bold text-navy">
+                        Private customer order-access token
+                      </p>
+                      <p className="text-xs text-navy mt-2">
+                        Copy and keep this token somewhere safe.
+                        It is shown only on this confirmation screen
+                        and cannot be recovered from the database.
+                        Do not share it publicly.
+                      </p>
+                      <p className="mt-3 break-all rounded-lg bg-ice p-3 font-mono text-xs text-navy select-all">
+                        {customerAccessToken}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(
+                              customerAccessToken
+                            );
+                            setTokenCopied(true);
+                          } catch {
+                            setTokenCopied(false);
+                          }
+                        }}
+                        className="mt-3 rounded-lg bg-navy px-4 py-2 text-sm font-bold text-white"
+                      >
+                        {tokenCopied ? 'Copied' : 'Copy access token'}
+                      </button>
+                      {customerTokenExpiresAt && (
+                        <p className="mt-3 text-xs text-navy">
+                          Expires:{' '}
+                          {new Date(
+                            customerTokenExpiresAt
+                          ).toLocaleString()}
+                        </p>
+                      )}
+                      <p className="mt-2 text-xs text-navy">
+                        This token is for the upcoming private
+                        order-status feature. The customer access
+                        page is not enabled yet.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="mt-6">
