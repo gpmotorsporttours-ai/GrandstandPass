@@ -4,6 +4,9 @@ import 'server-only';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
+import {
+  createCustomerOrderAccessToken,
+} from '../../../../lib/customerOrderAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,10 +31,7 @@ type TestItem = {
   quantity: number;
 };
 
-function response(
-  message: string,
-  status: number
-) {
+function response(message: string, status: number) {
   return NextResponse.json(
     { error: message },
     {
@@ -70,7 +70,7 @@ function secretMatches(
 }
 
 export async function POST(request: NextRequest) {
-  // This endpoint is never enabled in Production.
+  // Never enabled in Production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
@@ -78,7 +78,6 @@ export async function POST(request: NextRequest) {
     return response('Test order creation is disabled.', 404);
   }
 
-  // Additional private API access protection.
   const expectedSecret =
     process.env.TEST_ORDER_ACCESS_SECRET ?? '';
 
@@ -100,7 +99,11 @@ export async function POST(request: NextRequest) {
   const contentType =
     request.headers.get('content-type') ?? '';
 
-  if (!contentType.toLowerCase().startsWith('application/json')) {
+  if (
+    !contentType
+      .toLowerCase()
+      .startsWith('application/json')
+  ) {
     return response('JSON content required.', 415);
   }
 
@@ -166,7 +169,10 @@ export async function POST(request: NextRequest) {
     !validText(details.phone, 40) ||
     !validText(details.country, 100)
   ) {
-    return response('Please provide valid customer details.', 400);
+    return response(
+      'Please provide valid customer details.',
+      400
+    );
   }
 
   const items = data.items;
@@ -204,14 +210,20 @@ export async function POST(request: NextRequest) {
       item.supplier !== 'XS2Event' ||
       item.supplierEnvironment !== 'test'
     ) {
-      return response('Invalid XS2Event test ticket.', 400);
+      return response(
+        'Invalid XS2Event test ticket.',
+        400
+      );
     }
 
     const ticketKey =
       `${item.eventId}:${item.supplierTicketId}`;
 
     if (seenTickets.has(ticketKey)) {
-      return response('Duplicate ticket selection.', 400);
+      return response(
+        'Duplicate ticket selection.',
+        400
+      );
     }
 
     seenTickets.add(ticketKey);
@@ -232,34 +244,48 @@ export async function POST(request: NextRequest) {
   };
 
   const orderReference =
-    `GP-TEST-${randomUUID().replace(/-/g, '')
-      .slice(0, 12).toUpperCase()}`;
+    `GP-TEST-${randomUUID()
+      .replace(/-/g, '')
+      .slice(0, 12)
+      .toUpperCase()}`;
+
+  // Generate the customer token on the server.
+  // Only its hash and expiry are stored.
+  const customerAccess =
+    createCustomerOrderAccessToken();
 
   try {
     const supabase = getSupabaseAdmin();
 
-    const { error } = await supabase.from('orders').insert({
-      test_request_id: data.requestId,
-      order_reference: orderReference,
-      customer_first_name: cleanCustomer.firstName,
-      customer_last_name: cleanCustomer.lastName,
-      customer_email: cleanCustomer.email,
-      customer_phone: cleanCustomer.phone,
-      customer_country: cleanCustomer.country,
-      currency: 'EUR',
-      total_amount_minor: 0,
-      order_status: 'test_draft',
-      payment_provider: 'simulation',
-      items: validatedItems.map((item) => ({
-        ...item,
-        testOnly: true,
-        priceVerified: false,
-        availabilityVerified: false,
-      })),
-    });
+    const { error } = await supabase
+      .from('orders')
+      .insert({
+        test_request_id: data.requestId,
+        order_reference: orderReference,
+        customer_first_name: cleanCustomer.firstName,
+        customer_last_name: cleanCustomer.lastName,
+        customer_email: cleanCustomer.email,
+        customer_phone: cleanCustomer.phone,
+        customer_country: cleanCustomer.country,
+        currency: 'EUR',
+        total_amount_minor: 0,
+        order_status: 'test_draft',
+        payment_provider: 'simulation',
+
+        customer_access_token_hash:
+          customerAccess.tokenHash,
+        customer_access_token_expires_at:
+          customerAccess.expiresAt,
+
+        items: validatedItems.map((item) => ({
+          ...item,
+          testOnly: true,
+          priceVerified: false,
+          availabilityVerified: false,
+        })),
+      });
 
     if (error) {
-      // A repeated request ID cannot create a second order.
       if (error.code === '23505') {
         return response(
           'This test request was already submitted.',
@@ -267,9 +293,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      console.error('Test order insert failed:', error.code);
+      console.error(
+        'Test order insert failed:',
+        error.code
+      );
 
-      return response('Unable to save test order.', 500);
+      return response(
+        'Unable to save test order.',
+        500
+      );
     }
 
     return NextResponse.json(
@@ -277,17 +309,33 @@ export async function POST(request: NextRequest) {
         ok: true,
         orderReference,
         status: 'test_draft',
+
+        // Returned once. Never stored in plaintext.
+        customerAccessToken: customerAccess.token,
+        customerAccessExpiresAt:
+          customerAccess.expiresAt,
+
         message:
           'Test order saved. No payment or supplier booking was made.',
       },
       {
         status: 201,
-        headers: { 'Cache-Control': 'no-store' },
+        headers: {
+          'Cache-Control': 'no-store',
+        },
       }
     );
   } catch (error) {
-    console.error('Test order creation error:', error);
+    console.error(
+      'Test order creation error:',
+      error instanceof Error
+        ? error.name
+        : 'Unknown'
+    );
 
-    return response('Unable to create test order.', 500);
+    return response(
+      'Unable to create test order.',
+      500
+    );
   }
 }
