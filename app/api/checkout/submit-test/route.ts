@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { preflightXS2EventTicket } from '../../../../lib/xs2eventPreflight';
 import { calculateSupplierTicketPrice } from '../../../../lib/supplierPricing';
+import { createCustomerOrderAccessToken } from '../../../../lib/customerOrderAccess';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -166,8 +167,6 @@ export async function POST(request: NextRequest) {
   }
 
   // Vercel Deployment Protection must remain enabled.
-  // Origin checking is an additional safeguard,
-  // not a substitute for authentication.
   if (
     request.headers.get('origin') !==
     request.nextUrl.origin
@@ -282,8 +281,8 @@ export async function POST(request: NextRequest) {
   const ticketId = item.supplierTicketId;
   const quantity = item.quantity as number;
 
-  // The browser must explicitly submit the
-  // customer's acknowledged indicative price.
+  // Customer must explicitly acknowledge
+  // the indicative ticket price.
   const acknowledgement = readAcknowledgement(
     data.priceAcknowledgement
   );
@@ -295,8 +294,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Ensure the acknowledgement applies to
-  // exactly the ticket selection being ordered.
   if (
     acknowledgement.eventId !== eventId ||
     acknowledgement.ticketId !== ticketId ||
@@ -311,7 +308,7 @@ export async function POST(request: NextRequest) {
   let verifiedItem: TestItem;
 
   try {
-    // Fresh supplier GET verification.
+    // Read-only XS2Event test API verification.
     // No supplier reservation is created.
     const preflight = await preflightXS2EventTicket({
       eventId,
@@ -389,8 +386,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Reject a changed price instead of silently
-    // accepting a different amount.
+    // Never silently accept a changed price.
     if (
       acknowledgement.indicativeUnitAmountMinor !==
         indicativeUnitAmountMinor ||
@@ -455,6 +451,11 @@ export async function POST(request: NextRequest) {
       .slice(0, 12)
       .toUpperCase()}`;
 
+  // Generate a unique, secure customer access token.
+  // Only its SHA-256 hash is saved to Supabase.
+  const customerAccess =
+    createCustomerOrderAccessToken();
+
   try {
     const supabase = getSupabaseAdmin();
 
@@ -473,8 +474,6 @@ export async function POST(request: NextRequest) {
         customer_country: c.country.trim(),
 
         // Test orders remain non-payable.
-        // The acknowledged indicative amount
-        // is stored inside the items JSON.
         currency: 'EUR',
         total_amount_minor: 0,
 
@@ -482,6 +481,12 @@ export async function POST(request: NextRequest) {
         payment_provider: 'simulation',
 
         items: [verifiedItem],
+
+        // Store the hash, never the original token.
+        customer_access_token_hash:
+          customerAccess.tokenHash,
+        customer_access_token_expires_at:
+          customerAccess.expiresAt,
       });
 
     if (error) {
@@ -525,6 +530,13 @@ export async function POST(request: NextRequest) {
         customerPriceConfirmed: true,
         customerPriceConfirmedAt:
           verifiedItem.customerPriceConfirmedAt,
+
+        // Returned once, only to the customer.
+        // Never log or persist this raw token.
+        customerAccessToken:
+          customerAccess.token,
+        customerAccessTokenExpiresAt:
+          customerAccess.expiresAt,
 
         finalPriceGuaranteed: false,
         paymentCreated: false,
