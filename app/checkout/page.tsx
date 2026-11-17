@@ -447,6 +447,11 @@ export default function CheckoutPage() {
               supplierEnvironment:
                 item.supplierEnvironment,
               quantity: item.quantity,
+
+              // Customer-facing event descriptions.
+              eventName: item.eventName,
+              eventDate: item.eventDate ?? null,
+              ticketCategory: item.category,
             })),
 
             // Explicit customer acknowledgement.
