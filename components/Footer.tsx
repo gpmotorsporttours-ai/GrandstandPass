@@ -140,6 +140,13 @@ export default function Footer() {
                 My Booking
               </Link>
 
+              <Link
+                href="/faq"
+                className="hover:text-white transition-colors"
+              >
+                Frequently Asked Questions (FAQ)
+              </Link>
+
               <a
                 href="mailto:info@grandstandpass.com"
                 className="inline-flex items-center gap-2 hover:text-white transition-colors break-all"
