@@ -1,4 +1,3 @@
-
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,59 +11,42 @@ const MAX_BODY_BYTES = 2000;
 const ORDER_REFERENCE_PATTERN = /^GP-TEST-[A-F0-9]{12}$/;
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 
-function respond(
-  body: Record<string, unknown>,
-  status: number
-) {
+function respond(body: Record<string, unknown>, status: number) {
   return NextResponse.json(body, {
     status,
     headers: {
       'Cache-Control': 'no-store, private',
-      'Pragma': 'no-cache',
+      Pragma: 'no-cache',
       'X-Content-Type-Options': 'nosniff',
     },
   });
 }
 
 function denyAccess() {
-  // Do not reveal whether the order exists,
-  // the token is incorrect, or the token has expired.
+  // Do not reveal whether the order exists or why access failed.
   return respond(
-    {
-      ok: false,
-      error: 'Booking access is invalid or has expired.',
-    },
+    { ok: false, error: 'Booking access is invalid or has expired.' },
     403
   );
 }
 
+function safeDescription(value: unknown, maxLength: number): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= maxLength ? text : null;
+}
+
 export async function POST(request: NextRequest) {
-  // Test checkout is available only on Preview.
-  // Never expose test orders in production.
+  // Preview-only test booking lookup. Never enable in production.
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.TEST_ORDER_CREATION_ENABLED !== 'true'
   ) {
-    return respond(
-      {
-        ok: false,
-        error: 'Test booking access is disabled.',
-      },
-      404
-    );
+    return respond({ ok: false, error: 'Test booking access is disabled.' }, 404);
   }
 
-  // Only accept requests from the same website origin.
-  const origin = request.headers.get('origin');
-
-  if (origin !== request.nextUrl.origin) {
-    return respond(
-      {
-        ok: false,
-        error: 'Invalid request origin.',
-      },
-      403
-    );
+  if (request.headers.get('origin') !== request.nextUrl.origin) {
+    return respond({ ok: false, error: 'Invalid request origin.' }, 403);
   }
 
   if (
@@ -72,58 +54,24 @@ export async function POST(request: NextRequest) {
       .toLowerCase()
       .startsWith('application/json')
   ) {
-    return respond(
-      {
-        ok: false,
-        error: 'JSON content required.',
-      },
-      415
-    );
+    return respond({ ok: false, error: 'JSON content required.' }, 415);
   }
 
   let data: Record<string, unknown>;
 
   try {
     const raw = await request.text();
-
-    if (
-      Buffer.byteLength(raw, 'utf8') >
-      MAX_BODY_BYTES
-    ) {
-      return respond(
-        {
-          ok: false,
-          error: 'Request too large.',
-        },
-        413
-      );
+    if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
+      return respond({ ok: false, error: 'Request too large.' }, 413);
     }
 
     const parsed: unknown = JSON.parse(raw);
-
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      return respond(
-        {
-          ok: false,
-          error: 'Invalid request.',
-        },
-        400
-      );
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return respond({ ok: false, error: 'Invalid request.' }, 400);
     }
-
     data = parsed as Record<string, unknown>;
   } catch {
-    return respond(
-      {
-        ok: false,
-        error: 'Invalid request.',
-      },
-      400
-    );
+    return respond({ ok: false, error: 'Invalid request.' }, 400);
   }
 
   const orderReference = data.orderReference;
@@ -141,8 +89,7 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
 
-    // Use a literal select string so Supabase
-    // can correctly infer the returned columns.
+    // Literal selection preserves Supabase's column type inference.
     const { data: order, error } = await supabase
       .from('orders')
       .select(`
@@ -165,69 +112,47 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (error) {
-      console.error(
-        'Customer booking lookup failed:',
-        error.code
-      );
-
+      console.error('Customer booking lookup failed:', error.code);
       return respond(
-        {
-          ok: false,
-          error:
-            'Booking lookup is temporarily unavailable.',
-        },
+        { ok: false, error: 'Booking lookup is temporarily unavailable.' },
         503
       );
     }
 
-    if (!order) {
-      return denyAccess();
-    }
+    if (!order) return denyAccess();
 
-    // Validate the original token against
-    // the stored SHA-256 hash and expiry date.
     const validToken = verifyCustomerOrderAccessToken(
       accessToken,
       order.customer_access_token_hash,
       order.customer_access_token_expires_at
     );
 
-    if (!validToken) {
-      return denyAccess();
-    }
+    if (!validToken) return denyAccess();
 
-    // Return only safe, customer-facing fields.
-    // Never expose customer contact information,
-    // supplier ticket IDs, token hashes or
-    // internal supplier net pricing.
+    // Customer-facing fields only. Never expose supplier IDs, net costs,
+    // customer contact information, token hashes or other private fields.
     const safeItems = Array.isArray(order.items)
       ? order.items.map((item: unknown) => {
           const value =
-            item &&
-            typeof item === 'object' &&
-            !Array.isArray(item)
+            item && typeof item === 'object' && !Array.isArray(item)
               ? (item as Record<string, unknown>)
               : {};
 
           return {
+            eventName: safeDescription(value.eventName, 200),
+            eventDate: safeDescription(value.eventDate, 100),
+            ticketCategory: safeDescription(value.ticketCategory, 200),
             quantity:
               typeof value.quantity === 'number' &&
               Number.isInteger(value.quantity) &&
               value.quantity > 0
                 ? value.quantity
                 : null,
-
             indicativeCurrency:
-              value.indicativeCurrency === 'EUR'
-                ? 'EUR'
-                : null,
-
+              value.indicativeCurrency === 'EUR' ? 'EUR' : null,
             indicativeTotalAmountMinor:
-              typeof value.indicativeTotalAmountMinor ===
-                'number' &&
-              Number.isSafeInteger(
-                value.indicativeTotalAmountMinor
-              ) &&
+              typeof value.indicativeTotalAmountMinor === 'number' &&
+              Number.isSafeInteger(value.indicativeTotalAmountMinor) &&
               value.indicativeTotalAmountMinor > 0
                 ? value.indicativeTotalAmountMinor
                 : null,
@@ -243,13 +168,10 @@ export async function POST(request: NextRequest) {
           createdAt: order.created_at,
           orderStatus: order.order_status,
           paymentStatus: order.payment_status,
-          supplierReservationStatus:
-            order.supplier_reservation_status,
+          supplierReservationStatus: order.supplier_reservation_status,
           currency: order.currency,
           totalAmountMinor: order.total_amount_minor,
           items: safeItems,
-
-          // Explicit test-only indicators.
           testOnly: true,
           realPaymentCollected: false,
           realSupplierBookingCreated: false,
@@ -259,11 +181,7 @@ export async function POST(request: NextRequest) {
     );
   } catch {
     return respond(
-      {
-        ok: false,
-        error:
-          'Booking lookup is temporarily unavailable.',
-      },
+      { ok: false, error: 'Booking lookup is temporarily unavailable.' },
       503
     );
   }
