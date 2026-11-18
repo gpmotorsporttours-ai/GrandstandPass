@@ -9,7 +9,7 @@ const faqSections = [
       {
         question: 'What is Grandstand Pass?',
         answer:
-          'Grandstand Pass is an independent ticket reseller offering tickets to major sporting events around the world, including Formula 1, MotoGP, football, tennis and other sports.',
+          'Grandstand Pass is an independent ticket reseller offering tickets to major sporting events around the world, including Formula 1, MotoGP, Football, Tennis and other sports.',
       },
       {
         question: 'How can I purchase tickets?',
