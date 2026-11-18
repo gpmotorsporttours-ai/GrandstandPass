@@ -15,6 +15,9 @@ import {
 } from 'lucide-react';
 
 type BookingItem = {
+  eventName: string | null;
+  eventDate: string | null;
+  ticketCategory: string | null;
   quantity: number | null;
   indicativeCurrency: string | null;
   indicativeTotalAmountMinor: number | null;
@@ -62,6 +65,17 @@ function readableDate(value: string) {
     month: 'long',
     year: 'numeric',
   });
+}
+
+function indicativePrice(amount: number | null, currency: string | null) {
+  if (amount === null || !Number.isSafeInteger(amount) || amount <= 0 || currency !== 'EUR') {
+    return 'Not available';
+  }
+
+  return new Intl.NumberFormat('en-IE', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(amount / 100);
 }
 
 export default function MyBookingPage() {
@@ -319,6 +333,65 @@ export default function MyBookingPage() {
                         )}
                   </p>
                 </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+              <h2 className="text-xl font-bold">Ticket details</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Your selected test tickets and their indicative prices.
+              </p>
+
+              <div className="mt-6 space-y-5">
+                {booking.items.length === 0 ? (
+                  <p className="text-sm text-slate-600">
+                    No ticket details are available for this order.
+                  </p>
+                ) : (
+                  booking.items.map((item, index) => (
+                    <div
+                      key={index}
+                      className="rounded-xl border border-slate-200 bg-slate-50 p-5"
+                    >
+                      <h3 className="text-lg font-bold text-slate-900">
+                        {item.eventName || 'Event name not available'}
+                      </h3>
+                      <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <dt className="text-sm text-slate-500">Event date</dt>
+                          <dd className="mt-1 font-semibold">
+                            {item.eventDate || 'Not available'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-sm text-slate-500">Ticket category / grandstand</dt>
+                          <dd className="mt-1 font-semibold">
+                            {item.ticketCategory || 'Not available'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-sm text-slate-500">Quantity</dt>
+                          <dd className="mt-1 font-semibold">
+                            {item.quantity ?? 'Not available'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-sm text-slate-500">Indicative ticket total</dt>
+                          <dd className="mt-1 text-lg font-bold text-blue-700">
+                            {indicativePrice(
+                              item.indicativeTotalAmountMinor,
+                              item.indicativeCurrency
+                            )}
+                          </dd>
+                        </div>
+                      </dl>
+                      <p className="mt-4 text-xs text-slate-600">
+                        Indicative price only. No real payment was collected,
+                        no tickets were reserved and the final price is not guaranteed.
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
 
