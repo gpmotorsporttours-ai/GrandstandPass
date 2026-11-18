@@ -5,6 +5,7 @@ import {
   ShieldCheck,
   Globe2,
   Headphones,
+  Mail,
 } from 'lucide-react';
 
 export default function Footer() {
@@ -21,7 +22,8 @@ export default function Footer() {
                 Secure checkout planned
               </h3>
               <p className="text-sm muted mt-1">
-                Payments will be enabled only after integration and testing.
+                Payments will be enabled only after
+                integration and testing.
               </p>
             </div>
           </div>
@@ -35,7 +37,8 @@ export default function Footer() {
                 Events around the world
               </h3>
               <p className="text-sm muted mt-1">
-                Football, motorsport, tennis and more in one place.
+                Football, motorsport, tennis and more
+                in one place.
               </p>
             </div>
           </div>
@@ -49,7 +52,8 @@ export default function Footer() {
                 Customer-first experience
               </h3>
               <p className="text-sm muted mt-1">
-                Clear ticket information and a straightforward booking journey.
+                Clear ticket information and a
+                straightforward booking journey.
               </p>
             </div>
           </div>
@@ -57,7 +61,7 @@ export default function Footer() {
       </section>
 
       <footer className="bg-navy text-white py-12">
-        <div className="container-wide flex flex-col md:flex-row justify-between gap-8">
+        <div className="container-wide grid grid-cols-1 md:grid-cols-3 gap-10">
           <div>
             <Link
               href="/"
@@ -75,7 +79,8 @@ export default function Footer() {
             </Link>
 
             <p className="text-slate-300 text-sm mt-3 max-w-sm">
-              Your front-row pass to unforgettable sporting moments.
+              Your front-row pass to unforgettable
+              sporting moments.
             </p>
           </div>
 
@@ -83,25 +88,79 @@ export default function Footer() {
             <p className="font-bold text-white mb-3">
               Explore
             </p>
+
             <div className="grid gap-2">
-              <Link href="/football">
+              <Link
+                href="/football"
+                className="hover:text-white transition-colors"
+              >
                 Football
               </Link>
-              <Link href="/sport/formula-1">
+
+              <Link
+                href="/sport/formula-1"
+                className="hover:text-white transition-colors"
+              >
                 Formula 1
               </Link>
-              <Link href="/sport/motogp">
+
+              <Link
+                href="/sport/motogp"
+                className="hover:text-white transition-colors"
+              >
                 MotoGP
               </Link>
-              <Link href="/sport/tennis">
+
+              <Link
+                href="/sport/tennis"
+                className="hover:text-white transition-colors"
+              >
                 Tennis
               </Link>
+            </div>
+          </div>
+
+          <div className="text-sm text-slate-300">
+            <p className="font-bold text-white mb-3">
+              Contact &amp; Support
+            </p>
+
+            <div className="grid gap-3">
+              <Link
+                href="/contact"
+                className="hover:text-white transition-colors"
+              >
+                Contact Us
+              </Link>
+
+              <Link
+                href="/my-booking"
+                className="hover:text-white transition-colors"
+              >
+                My Booking
+              </Link>
+
+              <a
+                href="mailto:info@grandstandpass.com"
+                className="inline-flex items-center gap-2 hover:text-white transition-colors break-all"
+              >
+                <Mail
+                  size={17}
+                  aria-hidden="true"
+                  className="shrink-0"
+                />
+                info@grandstandpass.com
+              </a>
             </div>
           </div>
         </div>
 
         <div className="container-wide border-t border-slate-700 mt-8 pt-5 text-xs text-slate-400">
-          © {new Date().getFullYear()} Grandstand Pass · Prototype only · No tickets available for purchase yet.
+          © {new Date().getFullYear()} Grandstand Pass
+          {' · '}
+          Prototype only
+          {' · '}
+          No tickets available for purchase yet.
         </div>
       </footer>
     </>
