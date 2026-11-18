@@ -34,6 +34,12 @@ type TestItem = {
   supplierTicketId: string;
   quantity: number;
 
+  // Descriptions supplied by the cart for customer display.
+  // These are not independently verified supplier details.
+  eventName: string | null;
+  eventDate: string | null;
+  ticketCategory: string | null;
+
   testOnly: true;
   priceVerified: true;
   availabilityVerified: true;
@@ -277,6 +283,35 @@ export async function POST(request: NextRequest) {
     return fail('Invalid XS2Event test ticket.', 400);
   }
 
+  // Optional customer-facing descriptions. Validate their shape
+  // and length, but never use them for supplier verification.
+  const descriptionFields = [
+    ['eventName', 200],
+    ['eventDate', 100],
+    ['ticketCategory', 200],
+  ] as const;
+
+  for (const [field, maxLength] of descriptionFields) {
+    const value = item[field];
+    if (
+      value !== undefined &&
+      value !== null &&
+      (typeof value !== 'string' ||
+        value.trim().length > maxLength)
+    ) {
+      return fail('Invalid ticket description.', 400);
+    }
+  }
+
+  const displayText = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim().length > 0
+      ? value.trim()
+      : null;
+
+  const eventName = displayText(item.eventName);
+  const eventDate = displayText(item.eventDate);
+  const ticketCategory = displayText(item.ticketCategory);
+
   const eventId = item.eventId;
   const ticketId = item.supplierTicketId;
   const quantity = item.quantity as number;
@@ -406,6 +441,10 @@ export async function POST(request: NextRequest) {
       eventId,
       supplierTicketId: ticketId,
       quantity,
+
+      eventName,
+      eventDate,
+      ticketCategory,
 
       testOnly: true,
       priceVerified: true,
