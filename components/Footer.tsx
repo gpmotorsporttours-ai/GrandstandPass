@@ -38,7 +38,7 @@ export default function Footer() {
                 Events around the world
               </h3>
               <p className="text-sm muted mt-1">
-                Football, motorsport, tennis and more
+                Football, Motorsport, Tennis and more
                 in one place.
               </p>
             </div>
@@ -86,41 +86,56 @@ export default function Footer() {
             </p>
           </div>
 
-          {/* Explore */}
+          {/* Explore dropdown */}
           <div className="text-sm text-slate-300">
-            <p className="font-bold text-white mb-3">
-              Explore
-            </p>
+            <details className="group">
+              <summary className="flex items-center justify-between gap-3 cursor-pointer list-none font-bold text-white py-1 [&::-webkit-details-marker]:hidden">
+                <span>Explore</span>
 
-            <div className="grid gap-2">
-              <Link
-                href="/football"
-                className="hover:text-white transition-colors"
-              >
-                Football
-              </Link>
+                <ChevronDown
+                  size={20}
+                  aria-hidden="true"
+                  className="shrink-0 transition-transform duration-200 group-open:rotate-180"
+                />
+              </summary>
 
-              <Link
-                href="/sport/formula-1"
-                className="hover:text-white transition-colors"
-              >
-                Formula 1
-              </Link>
+              <div className="grid gap-3 mt-4 pl-1">
+                <Link
+                  href="/football"
+                  className="hover:text-white transition-colors"
+                >
+                  Football
+                </Link>
 
-              <Link
-                href="/sport/motogp"
-                className="hover:text-white transition-colors"
-              >
-                MotoGP
-              </Link>
+                <Link
+                  href="/sport/formula-1"
+                  className="hover:text-white transition-colors"
+                >
+                  Formula 1
+                </Link>
 
-              <Link
-                href="/sport/tennis"
-                className="hover:text-white transition-colors"
-              >
-                Tennis
-              </Link>
-            </div>
+                <Link
+                  href="/sport/motogp"
+                  className="hover:text-white transition-colors"
+                >
+                  MotoGP
+                </Link>
+
+                <Link
+                  href="/sport/tennis"
+                  className="hover:text-white transition-colors"
+                >
+                  Tennis
+                </Link>
+
+                <Link
+                  href="/sport/other-events"
+                  className="hover:text-white transition-colors"
+                >
+                  Other Events
+                </Link>
+              </div>
+            </details>
           </div>
 
           {/* Contact & Support dropdown */}
