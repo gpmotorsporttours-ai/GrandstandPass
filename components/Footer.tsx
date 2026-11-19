@@ -6,6 +6,7 @@ import {
   Globe2,
   Headphones,
   Mail,
+  ChevronDown,
 } from 'lucide-react';
 
 export default function Footer() {
@@ -62,6 +63,7 @@ export default function Footer() {
 
       <footer className="bg-navy text-white py-12">
         <div className="container-wide grid grid-cols-1 md:grid-cols-3 gap-10">
+          {/* Grandstand Pass logo */}
           <div>
             <Link
               href="/"
@@ -84,6 +86,7 @@ export default function Footer() {
             </p>
           </div>
 
+          {/* Explore */}
           <div className="text-sm text-slate-300">
             <p className="font-bold text-white mb-3">
               Explore
@@ -120,63 +123,78 @@ export default function Footer() {
             </div>
           </div>
 
+          {/* Contact & Support dropdown */}
           <div className="text-sm text-slate-300">
-            <p className="font-bold text-white mb-3">
-              Contact &amp; Support
-            </p>
+            <details className="group">
+              <summary className="flex items-center justify-between gap-3 cursor-pointer list-none font-bold text-white py-1 [&::-webkit-details-marker]:hidden">
+                <span>Contact &amp; Support</span>
 
-            <div className="grid gap-3">
-              <Link
-                href="/contact"
-                className="hover:text-white transition-colors"
-              >
-                Contact Us
-              </Link>
-
-              <Link
-                href="/my-booking"
-                className="hover:text-white transition-colors"
-              >
-                My Booking
-              </Link>
-
-              <Link
-                href="/faq"
-                className="hover:text-white transition-colors"
-              >
-                Frequently Asked Questions (FAQ)
-              </Link>
-
-              <Link
-                href="/terms"
-                className="hover:text-white transition-colors"
-              >
-                Terms &amp; Conditions
-              </Link>
-
-              <Link
-                href="/privacy"
-                className="hover:text-white transition-colors"
-              >
-                Privacy Policy
-              </Link>
-
-              <a
-                href="mailto:info@grandstandpass.com"
-                className="inline-flex items-center gap-2 hover:text-white transition-colors break-all"
-              >
-                <Mail
-                  size={17}
+                <ChevronDown
+                  size={20}
                   aria-hidden="true"
-                  className="shrink-0"
+                  className="shrink-0 transition-transform duration-200 group-open:rotate-180"
                 />
-                info@grandstandpass.com
-              </a>
-            </div>
+              </summary>
+
+              <div className="grid gap-3 mt-4 pl-1">
+                <Link
+                  href="/contact"
+                  className="hover:text-white transition-colors"
+                >
+                  Contact Us
+                </Link>
+
+                <Link
+                  href="/my-booking"
+                  className="hover:text-white transition-colors"
+                >
+                  My Booking
+                </Link>
+
+                <Link
+                  href="/faq"
+                  className="hover:text-white transition-colors"
+                >
+                  Frequently Asked Questions (FAQ)
+                </Link>
+
+                <Link
+                  href="/terms"
+                  className="hover:text-white transition-colors"
+                >
+                  Terms &amp; Conditions
+                </Link>
+
+                <Link
+                  href="/privacy"
+                  className="hover:text-white transition-colors"
+                >
+                  Privacy Policy
+                </Link>
+              </div>
+            </details>
           </div>
         </div>
 
-        <div className="container-wide border-t border-slate-700 mt-8 pt-5 text-xs text-slate-400">
+        {/* Contact email */}
+        <div className="container-wide mt-10 pt-6 border-t border-slate-700">
+          <div className="flex justify-center">
+            <a
+              href="mailto:info@grandstandpass.com"
+              className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors break-all"
+            >
+              <Mail
+                size={17}
+                aria-hidden="true"
+                className="shrink-0"
+              />
+              info@grandstandpass.com
+            </a>
+          </div>
+        </div>
+
+        {/* Copyright and development notice */}
+        <div className="container-wide mt-6 text-center text-xs text-slate-400">
           © {new Date().getFullYear()} Grandstand Pass
           {' · '}
           Prototype only
