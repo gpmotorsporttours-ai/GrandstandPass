@@ -147,6 +147,13 @@ export default function Footer() {
                 Frequently Asked Questions (FAQ)
               </Link>
 
+              <Link
+                href="/terms"
+                className="hover:text-white transition-colors"
+              >
+                Terms &amp; Conditions
+              </Link>
+
               <a
                 href="mailto:info@grandstandpass.com"
                 className="inline-flex items-center gap-2 hover:text-white transition-colors break-all"
