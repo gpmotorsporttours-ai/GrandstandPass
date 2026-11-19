@@ -154,6 +154,13 @@ export default function Footer() {
                 Terms &amp; Conditions
               </Link>
 
+              <Link
+                href="/privacy"
+                className="hover:text-white transition-colors"
+              >
+                Privacy Policy
+              </Link>
+
               <a
                 href="mailto:info@grandstandpass.com"
                 className="inline-flex items-center gap-2 hover:text-white transition-colors break-all"
