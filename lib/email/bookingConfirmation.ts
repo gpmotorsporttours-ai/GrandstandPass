@@ -31,10 +31,8 @@ export function bookingConfirmationHtml(
   const safe = (value: string) => escapeHtml(value);
   const testMode = booking.isTest === true;
 
-  // Email clients require an absolute HTTPS image URL.
-  // The logo must exist in the website's public folder.
-  const logoUrl =
-    'https://grandstand-pass-git-checkout-testing-grandstand-pass.vercel.app/grandstandpass-logo-transparent.png';
+  // The logo is embedded in the email using Content-ID.
+  const logoUrl = 'cid:grandstand-pass-logo';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -52,15 +50,15 @@ export function bookingConfirmationHtml(
 
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;">
 
-          <!-- Official Grandstand Pass logo -->
+          <!-- Grandstand Pass logo -->
           <tr>
             <td align="center" style="background:#ffffff;padding:30px 24px 24px;">
 
               <img
                 src="${logoUrl}"
                 alt="Grandstand Pass"
-                width="440"
-                style="display:block;width:100%;max-width:440px;height:auto;border:0;"
+                width="320"
+                style="display:block;width:100%;max-width:320px;height:auto;border:0;"
               />
 
               <div style="font-size:11px;letter-spacing:1px;color:#64748b;margin-top:16px;text-align:center;">
@@ -70,7 +68,7 @@ export function bookingConfirmationHtml(
             </td>
           </tr>
 
-          <!-- Brand divider -->
+          <!-- Navy divider -->
           <tr>
             <td style="background:#142440;height:5px;font-size:0;line-height:0;">
               &nbsp;
@@ -104,7 +102,7 @@ export function bookingConfirmationHtml(
                 }
               </p>
 
-              <!-- Booking information -->
+              <!-- Booking details -->
               <div style="background:#f1f4f8;padding:22px;margin:26px 0;">
 
                 <div style="font-size:11px;color:#64748b;letter-spacing:1px;">
@@ -171,7 +169,7 @@ export function bookingConfirmationHtml(
                 booking reference on our website.
               </p>
 
-              <!-- Booking button -->
+              <!-- View booking button -->
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0;">
                 <tr>
                   <td align="center" bgcolor="#142440" style="padding:15px;">
@@ -205,7 +203,7 @@ export function bookingConfirmationHtml(
             </td>
           </tr>
 
-          <!-- Footer -->
+          <!-- Company footer -->
           <tr>
             <td align="center" style="background:#e4eaf2;padding:24px;font-size:12px;color:#475569;line-height:1.8;">
               Grandstand Pass (Pty) Ltd<br />
