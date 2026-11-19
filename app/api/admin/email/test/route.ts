@@ -2,6 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { bookingConfirmationHtml } from
   '../../../../../lib/email/bookingConfirmation';
 
@@ -22,7 +25,7 @@ function secretsMatch(
 }
 
 export async function POST(request: NextRequest) {
-  // This test endpoint must never run in production.
+  // Never allow this test endpoint in production.
   if (process.env.VERCEL_ENV !== 'preview') {
     return NextResponse.json(
       { error: 'Not available' },
@@ -52,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   // All information below is fictional test data.
-  // No payment or booking is created.
+  // No real booking or payment is created.
   const html = bookingConfirmationHtml({
     customerName: 'Alex',
     bookingReference: 'GP-TEST-2026-001',
@@ -65,15 +68,26 @@ export async function POST(request: NextRequest) {
     isTest: true,
   });
 
-  const resend = new Resend(apiKey);
-
   try {
+    // Load the logo from the project's public folder.
+    const logoPath = path.join(
+      process.cwd(),
+      'public',
+      'grandstandpass-logo-transparent.png'
+    );
+
+    const logoBuffer = await readFile(logoPath);
+
+    const resend = new Resend(apiKey);
+
     const { data, error } = await resend.emails.send({
       from: 'Grandstand Pass <notifications@grandstandpass.com>',
       to: [recipient],
       subject:
         '[TEST] Grandstand Pass - Booking Confirmation',
+
       html,
+
       text:
         'GRANDSTAND PASS - TEST BOOKING CONFIRMATION\n\n' +
         'This is a simulated booking confirmation.\n' +
@@ -82,6 +96,17 @@ export async function POST(request: NextRequest) {
         'Quantity: 2\n\n' +
         'No real booking was created, no payment was taken, ' +
         'and no tickets were purchased.',
+
+      // Attach the logo inline using the same Content-ID
+      // referenced by the HTML template.
+      attachments: [
+        {
+          filename: 'grandstandpass-logo.png',
+          content: logoBuffer,
+          contentType: 'image/png',
+          contentId: 'grandstand-pass-logo',
+        },
+      ],
     });
 
     if (error) {
@@ -108,7 +133,15 @@ export async function POST(request: NextRequest) {
       paymentTaken: false,
       supplierContacted: false,
     });
-  } catch {
+
+  } catch (error) {
+    console.error(
+      'Email test failed:',
+      error instanceof Error
+        ? error.message
+        : 'Unknown error'
+    );
+
     return NextResponse.json(
       {
         ok: false,
