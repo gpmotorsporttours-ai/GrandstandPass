@@ -25,7 +25,7 @@ function secretsMatch(
 }
 
 export async function POST(request: NextRequest) {
-  // Never allow this test endpoint in production.
+  // This test endpoint is only available in Preview.
   if (process.env.VERCEL_ENV !== 'preview') {
     return NextResponse.json(
       { error: 'Not available' },
@@ -54,8 +54,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // All information below is fictional test data.
-  // No real booking or payment is created.
+  // Fictional booking details for testing only.
   const html = bookingConfirmationHtml({
     customerName: 'Alex',
     bookingReference: 'GP-TEST-2026-001',
@@ -69,11 +68,11 @@ export async function POST(request: NextRequest) {
   });
 
   try {
-    // Load the logo from the project's public folder.
+    // Read the new white-backed email logo.
     const logoPath = path.join(
       process.cwd(),
       'public',
-      'grandstandpass-logo-transparent.png'
+      'grandstandpass-logo-email.png'
     );
 
     const logoBuffer = await readFile(logoPath);
@@ -83,11 +82,8 @@ export async function POST(request: NextRequest) {
     const { data, error } = await resend.emails.send({
       from: 'Grandstand Pass <notifications@grandstandpass.com>',
       to: [recipient],
-      subject:
-        '[TEST] Grandstand Pass - Booking Confirmation',
-
+      subject: '[TEST] Grandstand Pass - Booking Confirmation',
       html,
-
       text:
         'GRANDSTAND PASS - TEST BOOKING CONFIRMATION\n\n' +
         'This is a simulated booking confirmation.\n' +
@@ -97,11 +93,10 @@ export async function POST(request: NextRequest) {
         'No real booking was created, no payment was taken, ' +
         'and no tickets were purchased.',
 
-      // Attach the logo inline using the same Content-ID
-      // referenced by the HTML template.
+      // Embed the logo directly in the email.
       attachments: [
         {
-          filename: 'grandstandpass-logo.png',
+          filename: 'grandstandpass-logo-email.png',
           content: logoBuffer,
           contentType: 'image/png',
           contentId: 'grandstand-pass-logo',
@@ -110,10 +105,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error(
-        'Booking email test failed:',
-        error.name
-      );
+      console.error('Booking email test failed:', error.name);
 
       return NextResponse.json(
         {
@@ -137,9 +129,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error(
       'Email test failed:',
-      error instanceof Error
-        ? error.message
-        : 'Unknown error'
+      error instanceof Error ? error.message : 'Unknown error'
     );
 
     return NextResponse.json(
