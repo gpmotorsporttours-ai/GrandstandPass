@@ -67,8 +67,16 @@ function readableDate(value: string) {
   });
 }
 
-function indicativePrice(amount: number | null, currency: string | null) {
-  if (amount === null || !Number.isSafeInteger(amount) || amount <= 0 || currency !== 'EUR') {
+function indicativePrice(
+  amount: number | null,
+  currency: string | null
+) {
+  if (
+    amount === null ||
+    !Number.isSafeInteger(amount) ||
+    amount <= 0 ||
+    currency !== 'EUR'
+  ) {
     return 'Not available';
   }
 
@@ -76,6 +84,21 @@ function indicativePrice(amount: number | null, currency: string | null) {
     style: 'currency',
     currency: 'EUR',
   }).format(amount / 100);
+}
+
+function displayOrderStatus(booking: Booking) {
+  if (booking.testOnly) {
+    switch (booking.orderStatus) {
+      case 'payment_confirmed':
+        return 'Simulated Payment Confirmed';
+      case 'test_draft':
+        return 'Test Order Received';
+      default:
+        return `Test — ${readableStatus(booking.orderStatus)}`;
+    }
+  }
+
+  return readableStatus(booking.orderStatus);
 }
 
 export default function MyBookingPage() {
@@ -87,7 +110,9 @@ export default function MyBookingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function handleLookup(event: FormEvent<HTMLFormElement>) {
+  async function handleLookup(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     setError('');
@@ -104,7 +129,9 @@ export default function MyBookingPage() {
           },
           cache: 'no-store',
           body: JSON.stringify({
-            orderReference: orderReference.trim().toUpperCase(),
+            orderReference: orderReference
+              .trim()
+              .toUpperCase(),
             accessToken: accessToken.trim(),
           }),
         }
@@ -194,7 +221,10 @@ export default function MyBookingPage() {
             </div>
           </div>
 
-          <form onSubmit={handleLookup} className="space-y-5">
+          <form
+            onSubmit={handleLookup}
+            className="space-y-5"
+          >
             <div>
               <label
                 htmlFor="orderReference"
@@ -245,7 +275,9 @@ export default function MyBookingPage() {
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-semibold text-white transition hover:bg-blue-800 disabled:opacity-60"
             >
               <Search className="h-5 w-5" />
-              {loading ? 'Finding booking...' : 'View My Booking'}
+              {loading
+                ? 'Finding booking...'
+                : 'View My Booking'}
             </button>
           </form>
 
@@ -291,12 +323,13 @@ export default function MyBookingPage() {
                   </h2>
 
                   <p className="mt-2 text-sm text-slate-600">
-                    Created {readableDate(booking.createdAt)}
+                    Created{' '}
+                    {readableDate(booking.createdAt)}
                   </p>
                 </div>
 
                 <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
-                  {readableStatus(booking.orderStatus)}
+                  {displayOrderStatus(booking)}
                 </span>
               </div>
 
@@ -317,7 +350,9 @@ export default function MyBookingPage() {
                   <p className="mt-1 font-semibold">
                     {paymentConfirmed
                       ? 'Simulated payment confirmed'
-                      : readableStatus(booking.paymentStatus)}
+                      : readableStatus(
+                          booking.paymentStatus
+                        )}
                   </p>
                 </div>
 
@@ -337,15 +372,19 @@ export default function MyBookingPage() {
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-              <h2 className="text-xl font-bold">Ticket details</h2>
+              <h2 className="text-xl font-bold">
+                Ticket details
+              </h2>
               <p className="mt-2 text-sm text-slate-600">
-                Your selected test tickets and their indicative prices.
+                Your selected test tickets and their
+                indicative prices.
               </p>
 
               <div className="mt-6 space-y-5">
                 {booking.items.length === 0 ? (
                   <p className="text-sm text-slate-600">
-                    No ticket details are available for this order.
+                    No ticket details are available for
+                    this order.
                   </p>
                 ) : (
                   booking.items.map((item, index) => (
@@ -354,29 +393,45 @@ export default function MyBookingPage() {
                       className="rounded-xl border border-slate-200 bg-slate-50 p-5"
                     >
                       <h3 className="text-lg font-bold text-slate-900">
-                        {item.eventName || 'Event name not available'}
+                        {item.eventName ||
+                          'Event name not available'}
                       </h3>
+
                       <dl className="mt-4 grid gap-4 sm:grid-cols-2">
                         <div>
-                          <dt className="text-sm text-slate-500">Event date</dt>
+                          <dt className="text-sm text-slate-500">
+                            Event date
+                          </dt>
                           <dd className="mt-1 font-semibold">
-                            {item.eventDate || 'Not available'}
+                            {item.eventDate ||
+                              'Not available'}
                           </dd>
                         </div>
+
                         <div>
-                          <dt className="text-sm text-slate-500">Ticket category / grandstand</dt>
+                          <dt className="text-sm text-slate-500">
+                            Ticket category / grandstand
+                          </dt>
                           <dd className="mt-1 font-semibold">
-                            {item.ticketCategory || 'Not available'}
+                            {item.ticketCategory ||
+                              'Not available'}
                           </dd>
                         </div>
+
                         <div>
-                          <dt className="text-sm text-slate-500">Quantity</dt>
+                          <dt className="text-sm text-slate-500">
+                            Quantity
+                          </dt>
                           <dd className="mt-1 font-semibold">
-                            {item.quantity ?? 'Not available'}
+                            {item.quantity ??
+                              'Not available'}
                           </dd>
                         </div>
+
                         <div>
-                          <dt className="text-sm text-slate-500">Indicative ticket total</dt>
+                          <dt className="text-sm text-slate-500">
+                            Indicative ticket total
+                          </dt>
                           <dd className="mt-1 text-lg font-bold text-blue-700">
                             {indicativePrice(
                               item.indicativeTotalAmountMinor,
@@ -385,9 +440,12 @@ export default function MyBookingPage() {
                           </dd>
                         </div>
                       </dl>
+
                       <p className="mt-4 text-xs text-slate-600">
-                        Indicative price only. No real payment was collected,
-                        no tickets were reserved and the final price is not guaranteed.
+                        Indicative price only. No real
+                        payment was collected, no tickets
+                        were reserved and the final price
+                        is not guaranteed.
                       </p>
                     </div>
                   ))
@@ -401,7 +459,8 @@ export default function MyBookingPage() {
               </h2>
 
               <p className="mt-2 text-sm text-slate-600">
-                Follow the current state of your test booking.
+                Follow the current state of your test
+                booking.
               </p>
 
               <div className="mt-7 space-y-6">
