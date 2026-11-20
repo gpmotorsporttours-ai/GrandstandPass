@@ -2,10 +2,15 @@
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { Resend } from 'resend';
+
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 import { preflightXS2EventTicket } from '../../../../lib/xs2eventPreflight';
 import { calculateSupplierTicketPrice } from '../../../../lib/supplierPricing';
 import { createCustomerOrderAccessToken } from '../../../../lib/customerOrderAccess';
+import { orderAcknowledgementHtml } from '../../../../lib/email/orderAcknowledgement';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,8 +39,6 @@ type TestItem = {
   supplierTicketId: string;
   quantity: number;
 
-  // Descriptions supplied by the cart for customer display.
-  // These are not independently verified supplier details.
   eventName: string | null;
   eventDate: string | null;
   ticketCategory: string | null;
@@ -162,6 +165,178 @@ function readAcknowledgement(
   };
 }
 
+function formatEuros(amountMinor: number): string {
+  return new Intl.NumberFormat('en-IE', {
+    style: 'currency',
+    currency: 'EUR',
+  }).format(amountMinor / 100);
+}
+
+async function sendTestOrderAcknowledgement(input: {
+  requestId: string;
+  orderReference: string;
+  customerName: string;
+  item: TestItem;
+}): Promise<'sent' | 'failed' | 'skipped'> {
+  // Never send from this helper outside Preview.
+  if (process.env.VERCEL_ENV !== 'preview') {
+    return 'skipped';
+  }
+
+  const apiKey = process.env.RESEND_API_KEY;
+  const recipient = process.env.EMAIL_TEST_RECIPIENT;
+
+  // For now, only the configured test inbox receives mail.
+  if (!apiKey || !recipient) {
+    console.error('Test acknowledgement email not configured.');
+    return 'skipped';
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  // Atomically claim the email for this order.
+  // Only one request can change pending to sending.
+  const { data: claimed, error: claimError } =
+    await supabase
+      .from('orders')
+      .update({
+        acknowledgement_email_status: 'sending',
+      })
+      .eq('test_request_id', input.requestId)
+      .eq('order_reference', input.orderReference)
+      .eq('order_status', 'test_draft')
+      .eq('acknowledgement_email_status', 'pending')
+      .select('id')
+      .maybeSingle();
+
+  if (claimError) {
+    console.error(
+      'Email claim failed:',
+      claimError.code
+    );
+    return 'failed';
+  }
+
+  if (!claimed) {
+    // Already claimed or previously processed.
+    return 'skipped';
+  }
+
+  try {
+    const logoPath = path.join(
+      process.cwd(),
+      'public',
+      'grandstandpass-logo-email.png'
+    );
+
+    const logoBuffer = await readFile(logoPath);
+
+    const html = orderAcknowledgementHtml({
+      customerName: input.customerName,
+      orderReference: input.orderReference,
+      eventName:
+        input.item.eventName ?? 'Sporting Event',
+      ticketDescription:
+        input.item.ticketCategory ?? 'Event Tickets',
+      quantity: input.item.quantity,
+      totalAmount: formatEuros(
+        input.item.indicativeTotalAmountMinor
+      ),
+    });
+
+    const resend = new Resend(apiKey);
+
+    const { data, error } = await resend.emails.send({
+      from:
+        'Grandstand Pass <notifications@grandstandpass.com>',
+      to: [recipient],
+      subject:
+        '[TEST] Grandstand Pass - Order Acknowledgement',
+      html,
+      text:
+        'GRANDSTAND PASS - TEST ORDER ACKNOWLEDGEMENT\n\n' +
+        `Order reference: ${input.orderReference}\n` +
+        `Event: ${input.item.eventName ?? 'Sporting Event'}\n` +
+        `Quantity: ${input.item.quantity}\n` +
+        `Indicative total: ${formatEuros(
+          input.item.indicativeTotalAmountMinor
+        )}\n\n` +
+        'This is a test order only. ' +
+        'No payment was taken, no booking was confirmed, ' +
+        'and no tickets were reserved.',
+
+      attachments: [
+        {
+          filename: 'grandstandpass-logo-email.png',
+          content: logoBuffer,
+          contentType: 'image/png',
+          contentId: 'grandstand-pass-logo',
+        },
+      ],
+    });
+
+    if (error || !data?.id) {
+      console.error(
+        'Test acknowledgement send failed:',
+        error?.name ?? 'Missing email ID'
+      );
+
+      await supabase
+        .from('orders')
+        .update({
+          acknowledgement_email_status: 'failed',
+        })
+        .eq('id', claimed.id)
+        .eq('acknowledgement_email_status', 'sending');
+
+      return 'failed';
+    }
+
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({
+        acknowledgement_email_status: 'sent',
+        acknowledgement_email_sent_at:
+          new Date().toISOString(),
+        acknowledgement_email_id: data.id,
+      })
+      .eq('id', claimed.id)
+      .eq('acknowledgement_email_status', 'sending');
+
+    if (updateError) {
+      // The provider accepted the email, but tracking failed.
+      // Do not automatically resend it.
+      console.error(
+        'Email accepted but status update failed:',
+        updateError.code
+      );
+
+      return 'failed';
+    }
+
+    return 'sent';
+  } catch (error) {
+    console.error(
+      'Test acknowledgement error:',
+      error instanceof Error
+        ? error.name
+        : 'Unknown'
+    );
+
+    // Keep failed attempts visible in Supabase.
+    // No automatic retry, to minimise duplicate emails.
+    await supabase
+      .from('orders')
+      .update({
+        acknowledgement_email_status: 'failed',
+      })
+      .eq('id', claimed.id)
+      .eq('acknowledgement_email_status', 'sending');
+
+    return 'failed';
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Preview-only test checkout.
   // Never enable this endpoint in production.
@@ -283,8 +458,6 @@ export async function POST(request: NextRequest) {
     return fail('Invalid XS2Event test ticket.', 400);
   }
 
-  // Optional customer-facing descriptions. Validate their shape
-  // and length, but never use them for supplier verification.
   const descriptionFields = [
     ['eventName', 200],
     ['eventDate', 100],
@@ -293,6 +466,7 @@ export async function POST(request: NextRequest) {
 
   for (const [field, maxLength] of descriptionFields) {
     const value = item[field];
+
     if (
       value !== undefined &&
       value !== null &&
@@ -312,8 +486,8 @@ export async function POST(request: NextRequest) {
   const eventDate = displayText(item.eventDate);
   const ticketCategory = displayText(item.ticketCategory);
 
-  const eventId = item.eventId;
-  const ticketId = item.supplierTicketId;
+  const eventId = item.eventId as string;
+  const ticketId = item.supplierTicketId as string;
   const quantity = item.quantity as number;
 
   // Customer must explicitly acknowledge
@@ -484,8 +658,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const requestId = data.requestId as string;
+
   const orderReference =
-    `GP-TEST-${data.requestId
+    `GP-TEST-${requestId
       .replace(/-/g, '')
       .slice(0, 12)
       .toUpperCase()}`;
@@ -501,7 +677,7 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase
       .from('orders')
       .insert({
-        test_request_id: data.requestId,
+        test_request_id: requestId,
         order_reference: orderReference,
 
         customer_first_name: c.firstName.trim(),
@@ -521,7 +697,6 @@ export async function POST(request: NextRequest) {
 
         items: [verifiedItem],
 
-        // Store the hash, never the original token.
         customer_access_token_hash:
           customerAccess.tokenHash,
         customer_access_token_expires_at:
@@ -544,6 +719,26 @@ export async function POST(request: NextRequest) {
       return fail(
         'Unable to save test order.',
         500
+      );
+    }
+
+    // The order is saved successfully at this point.
+    // Email failure must never undo or invalidate it.
+    let acknowledgementEmailStatus:
+      'sent' | 'failed' | 'skipped' = 'skipped';
+
+    try {
+      acknowledgementEmailStatus =
+        await sendTestOrderAcknowledgement({
+          requestId,
+          orderReference,
+          customerName: c.firstName.trim(),
+          item: verifiedItem,
+        });
+    } catch {
+      acknowledgementEmailStatus = 'failed';
+      console.error(
+        'Unexpected acknowledgement processing failure.'
       );
     }
 
@@ -570,12 +765,12 @@ export async function POST(request: NextRequest) {
         customerPriceConfirmedAt:
           verifiedItem.customerPriceConfirmedAt,
 
-        // Returned once, only to the customer.
-        // Never log or persist this raw token.
         customerAccessToken:
           customerAccess.token,
         customerAccessTokenExpiresAt:
           customerAccess.expiresAt,
+
+        acknowledgementEmailStatus,
 
         finalPriceGuaranteed: false,
         paymentCreated: false,
