@@ -133,6 +133,9 @@ export default function CheckoutPage() {
   const [priceAccepted, setPriceAccepted] =
     useState(false);
 
+  const [termsAccepted, setTermsAccepted] =
+    useState(false);
+
   const [verificationError, setVerificationError] =
     useState<string | null>(null);
 
@@ -264,6 +267,7 @@ export default function CheckoutPage() {
     allTestTickets &&
     quoteIsCurrent &&
     priceAccepted &&
+    termsAccepted &&
     !verifying &&
     !submitting &&
     !orderReference;
@@ -389,6 +393,7 @@ export default function CheckoutPage() {
       !verifiedQuote ||
       !quoteIsCurrent ||
       !priceAccepted ||
+      !termsAccepted ||
       submittingRef.current ||
       orderReference
     ) {
@@ -1011,6 +1016,40 @@ export default function CheckoutPage() {
                   </p>
                 )}
               </section>
+
+              {!orderReference && (
+                <section className="mt-6 rounded-xl border bg-white p-4">
+                  <h3 className="font-black text-navy mb-3">
+                    Terms and Conditions
+                  </h3>
+
+                  <label className="flex items-start gap-3 text-sm text-navy cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={termsAccepted}
+                      disabled={submitting}
+                      onChange={(event) =>
+                        setTermsAccepted(event.target.checked)
+                      }
+                      className="mt-1"
+                    />
+
+                    <span>
+                      I have read and agree to the{' '}
+                      <Link
+                        href="/terms"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-blue underline"
+                      >
+                        Terms and Conditions
+                      </Link>
+                      . This is a test order only; no payment
+                      or supplier reservation will be made.
+                    </span>
+                  </label>
+                </section>
+              )}
 
               {orderReference ? (
                 <div
