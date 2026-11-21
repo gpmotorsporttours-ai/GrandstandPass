@@ -1,4 +1,3 @@
-
 type BookingConfirmationData = {
   customerName: string;
   bookingReference: string;
@@ -30,6 +29,11 @@ export function bookingConfirmationHtml(
 ): string {
   const safe = (value: string) => escapeHtml(value);
   const testMode = booking.isTest === true;
+
+  // Test emails must link to the test website, not the live domain.
+  const bookingUrl = testMode
+    ? 'https://grandstand-pass-git-checkout-testing-grandstand-pass.vercel.app/my-booking'
+    : 'https://grandstandpass.com/my-booking';
 
   // The logo is embedded in the email using Content-ID.
   const logoUrl = 'cid:grandstand-pass-logo';
@@ -174,7 +178,7 @@ export function bookingConfirmationHtml(
                 <tr>
                   <td align="center" bgcolor="#142440" style="padding:15px;">
                     <a
-                      href="https://grandstandpass.com/my-booking"
+                      href="${bookingUrl}"
                       style="color:#ffffff;text-decoration:none;font-weight:bold;"
                     >
                       View Your Booking
