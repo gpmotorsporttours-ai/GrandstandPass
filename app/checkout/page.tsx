@@ -463,6 +463,13 @@ export default function CheckoutPage() {
             // The server does not trust the amount
             // without a fresh supplier price check.
             priceAcknowledgement,
+
+            // Test-only Terms acknowledgement. The API must
+            // validate and record this independently.
+            termsAcceptance: {
+              accepted: termsAccepted,
+              version: 'gp-terms-v1',
+            },
           }),
         }
       );
