@@ -91,6 +91,8 @@ function displayOrderStatus(booking: Booking) {
     switch (booking.orderStatus) {
       case 'payment_confirmed':
         return 'Simulated Payment Confirmed';
+      case 'manual_review':
+        return 'Booking Under Review (Test)';
       case 'test_draft':
         return 'Test Order Received';
       default:
@@ -168,8 +170,11 @@ export default function MyBookingPage() {
     'simulated_reserved';
 
   const supplierRejected =
-    booking?.supplierReservationStatus ===
-    'simulated_rejected';
+    booking?.supplierReservationStatus === 'simulated_rejected' ||
+    booking?.supplierReservationStatus === 'manual_review_required';
+
+  const bookingUnderReview =
+    booking?.orderStatus === 'manual_review' || supplierRejected;
 
   const totalTickets =
     booking?.items.reduce(
@@ -311,6 +316,20 @@ export default function MyBookingPage() {
               </div>
             </div>
 
+            {bookingUnderReview && (
+              <section role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
+                <h2 className="text-lg font-bold text-amber-900">
+                  Booking under review
+                </h2>
+                <p className="mt-2 text-sm text-amber-900">
+                  Your booking requires review by our team. We will update you once the booking status has been resolved.
+                </p>
+                <p className="mt-2 text-sm text-amber-800">
+                  This is a test booking. No real payment was collected and no real supplier reservation was made.
+                </p>
+              </section>
+            )}
+
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -363,6 +382,8 @@ export default function MyBookingPage() {
                   <p className="mt-1 font-semibold">
                     {supplierSimulated
                       ? 'Simulated reservation successful'
+                      : supplierRejected
+                        ? 'Review required — simulated reservation unsuccessful'
                       : readableStatus(
                           booking.supplierReservationStatus
                         )}
@@ -510,7 +531,7 @@ export default function MyBookingPage() {
                       {supplierSimulated
                         ? 'A successful supplier response was simulated. No real reservation was created.'
                         : supplierRejected
-                          ? 'The simulated supplier response was unsuccessful.'
+                          ? 'The simulated supplier response was unsuccessful. Your booking requires review by our team.'
                           : 'No successful supplier reservation simulation has been recorded.'}
                     </p>
                   </div>
