@@ -473,7 +473,7 @@ export async function POST(request: NextRequest) {
         : {
             outcome: 'failure',
             simulatedReservationId: null,
-            simulatedStatus: 'simulated_rejected',
+            simulatedStatus: 'manual_review_required',
             customerMessage:
               'Test reservation rejected (simulation only).',
           };
