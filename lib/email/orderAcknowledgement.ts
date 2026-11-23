@@ -27,6 +27,11 @@ export function orderAcknowledgementHtml(
 ): string {
   const safe = (value: string) => escapeHtml(value);
 
+  // Test orders must use the preview website.
+  // This link does not contain the private access token.
+  const bookingUrl =
+    'https://grandstand-pass-git-checkout-testing-grandstand-pass.vercel.app/my-booking';
+
   // Reuse the Content-ID from our working booking email.
   const logoUrl = 'cid:grandstand-pass-logo';
 
@@ -148,6 +153,48 @@ export function orderAcknowledgementHtml(
                 No further action is required for this test.
                 No payment has been collected, no supplier order
                 has been placed, and no tickets have been reserved.
+              </p>
+
+              <h2 style="font-size:18px;color:#142440;margin-top:28px;">
+                View Your Booking
+              </h2>
+
+              <p style="color:#475569;line-height:1.7;">
+                You can view the current status of your test order
+                through the My Booking page on Grandstand Pass.
+              </p>
+
+              <p style="color:#475569;line-height:1.7;">
+                Please check the email inbox at the address you
+                provided during checkout for your test order
+                email or booking confirmation email.
+              </p>
+
+              <p style="color:#475569;line-height:1.7;">
+                Use the View Your Booking button below to open
+                the My Booking page. You will need your order
+                reference and private access token to access
+                your booking information securely.
+              </p>
+
+              <!-- View booking button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:24px 0;">
+                <tr>
+                  <td align="center" bgcolor="#142440" style="background:#142440;padding:15px;">
+                    <a
+                      href="${bookingUrl}"
+                      style="color:#ffffff;text-decoration:none;font-weight:bold;display:block;"
+                    >
+                      View Your Booking
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="color:#475569;line-height:1.7;">
+                Alternatively, you can access My Booking
+                using the link at the bottom of the
+                Grandstand Pass homepage.
               </p>
 
               <p style="font-size:13px;color:#64748b;line-height:1.7;">
