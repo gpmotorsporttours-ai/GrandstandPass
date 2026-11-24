@@ -9,10 +9,24 @@ import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+const SOURCE_ENVIRONMENT = 'test';
+
+const EVENT_PAGE_SIZE = 50;
+const TICKET_PAGE_SIZE = 50;
+const MAX_TICKET_PAGES = 5;
+const MAX_EVENT_PAGES = 1000;
+const BATCH_SIZE = 3;
+const RUN_BUDGET_MS = 40000;
+
+const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
+const SAFE_SPORT = /^[a-z0-9_-]{1,50}$/;
 
 type SupplierEvent = {
   event_id?: string;
   event_name?: string;
+  sport_type?: string;
   tournament_name?: string;
   venue_name?: string;
   city?: string;
@@ -37,10 +51,19 @@ type SupplierTicketsResponse = {
   tickets?: SupplierTicket[];
 };
 
-const PAGE_SIZE = 50;
-const MAX_EVENT_PAGES = 20;
-const MAX_TICKET_PAGES = 5;
-const MAX_EVENTS_PER_RUN = 20;
+type Availability = {
+  hasAvailableTickets: boolean;
+  availableCategories: number;
+};
+
+function json(data: unknown, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+    },
+  });
+}
 
 function isAuthorised(request: NextRequest): boolean {
   const configuredSecret = process.env.CRON_SECRET;
@@ -49,43 +72,24 @@ function isAuthorised(request: NextRequest): boolean {
     return false;
   }
 
-  const authorization = request.headers.get('authorization') || '';
+  const authorization =
+    request.headers.get('authorization') || '';
 
   if (!authorization.startsWith('Bearer ')) {
     return false;
   }
 
-  const providedSecret = authorization.slice(7);
-
   const expected = Buffer.from(configuredSecret, 'utf8');
-  const provided = Buffer.from(providedSecret, 'utf8');
+  const provided = Buffer.from(
+    authorization.slice(7),
+    'utf8'
+  );
 
   if (expected.length !== provided.length) {
     return false;
   }
 
   return timingSafeEqual(expected, provided);
-}
-
-function isValidFormula1Event(event: SupplierEvent): boolean {
-  if (
-    !event.event_id ||
-    !/^[A-Za-z0-9_-]{1,150}$/.test(event.event_id) ||
-    !event.event_name?.trim() ||
-    !event.date_start
-  ) {
-    return false;
-  }
-
-  if (event.event_status !== 'notstarted') {
-    return false;
-  }
-
-  if (/test|dummy|sample|atp tour|motogp/i.test(event.event_name)) {
-    return false;
-  }
-
-  return /grand prix/i.test(event.event_name);
 }
 
 function parseSupplierDate(value?: string): string | null {
@@ -100,85 +104,169 @@ function parseSupplierDate(value?: string): string | null {
   return new Date(timestamp).toISOString();
 }
 
-async function fetchFormula1Events(): Promise<SupplierEvent[]> {
-  const today = new Date().toISOString().slice(0, 10);
-  const unique = new Map<string, SupplierEvent>();
-  let complete = false;
+function parseInteger(
+  value: string | null,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number | null {
+  if (value === null) {
+    return fallback;
+  }
 
-  for (let page = 1; page <= MAX_EVENT_PAGES; page++) {
-    const params = new URLSearchParams({
-      sport_type: 'formula1',
-      date_stop: `ge:${today}`,
-      sorting: 'date_start:asc',
-      page_size: String(PAGE_SIZE),
-      page: String(page),
-    });
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
 
-    const response = await xs2eventGet<SupplierEventsResponse>(
+  const parsed = Number(value);
+
+  if (
+    !Number.isSafeInteger(parsed) ||
+    parsed < minimum ||
+    parsed > maximum
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function isValidEvent(
+  event: SupplierEvent,
+  sport: string
+): boolean {
+  if (
+    !event.event_id ||
+    !SAFE_ID.test(event.event_id) ||
+    !event.event_name?.trim() ||
+    !parseSupplierDate(event.date_start)
+  ) {
+    return false;
+  }
+
+  if (
+    event.sport_type &&
+    event.sport_type !== sport
+  ) {
+    return false;
+  }
+
+  if (event.event_status !== 'notstarted') {
+    return false;
+  }
+
+  if (
+    /\b(test|dummy|sample)\b/i.test(event.event_name)
+  ) {
+    return false;
+  }
+
+  if (sport === 'formula1') {
+    if (
+      /atp tour|motogp/i.test(event.event_name)
+    ) {
+      return false;
+    }
+
+    return /grand prix/i.test(event.event_name);
+  }
+
+  return true;
+}
+
+function checkRunBudget(startedAt: number) {
+  if (Date.now() - startedAt >= RUN_BUDGET_MS) {
+    throw new Error('Synchronisation time budget reached.');
+  }
+}
+
+async function fetchEventPage(
+  sport: string,
+  page: number
+): Promise<SupplierEvent[]> {
+  const today = new Date()
+    .toISOString()
+    .slice(0, 10);
+
+  const params = new URLSearchParams({
+    sport_type: sport,
+    date_stop: `ge:${today}`,
+    sorting: 'date_start:asc',
+    page_size: String(EVENT_PAGE_SIZE),
+    page: String(page),
+  });
+
+  const response =
+    await xs2eventGet<SupplierEventsResponse>(
       `/events?${params.toString()}`
     );
 
-    if (!Array.isArray(response.events)) {
-      throw new Error('Unexpected XS2Event events response.');
-    }
-
-    for (const event of response.events) {
-      if (isValidFormula1Event(event) && event.event_id) {
-        unique.set(event.event_id, event);
-      }
-    }
-
-    if (response.events.length < PAGE_SIZE) {
-      complete = true;
-      break;
-    }
-  }
-
-  if (!complete) {
+  if (!Array.isArray(response.events)) {
     throw new Error(
-      'Formula 1 event pagination limit reached. Synchronisation stopped.'
+      'Unexpected XS2Event events response.'
     );
   }
 
-  return [...unique.values()].sort((a, b) =>
-    (a.date_start || '').localeCompare(b.date_start || '')
-  );
+  return response.events;
 }
 
-async function fetchTicketAvailability(eventId: string) {
-  const uniqueTickets = new Map<string, SupplierTicket>();
+async function fetchTicketAvailability(
+  eventId: string,
+  startedAt: number
+): Promise<Availability> {
+  const uniqueTickets =
+    new Map<string, SupplierTicket>();
+
   let complete = false;
 
-  for (let page = 1; page <= MAX_TICKET_PAGES; page++) {
+  for (
+    let page = 1;
+    page <= MAX_TICKET_PAGES;
+    page++
+  ) {
+    checkRunBudget(startedAt);
+
     const params = new URLSearchParams({
       event_id: eventId,
       ticket_status: 'available',
       stock: 'gt:0',
-      page_size: String(PAGE_SIZE),
+      page_size: String(TICKET_PAGE_SIZE),
       page: String(page),
     });
 
-    const response = await xs2eventGet<SupplierTicketsResponse>(
-      `/tickets?${params.toString()}`
-    );
+    const response =
+      await xs2eventGet<SupplierTicketsResponse>(
+        `/tickets?${params.toString()}`
+      );
 
     if (!Array.isArray(response.tickets)) {
-      throw new Error('Unexpected XS2Event tickets response.');
+      throw new Error(
+        'Unexpected XS2Event tickets response.'
+      );
     }
 
     for (const ticket of response.tickets) {
       if (
         ticket.ticket_id &&
+        SAFE_ID.test(ticket.ticket_id) &&
         ticket.ticket_status === 'available' &&
         Number.isInteger(ticket.stock) &&
         (ticket.stock ?? 0) > 0 &&
-        (!ticket.event_id || ticket.event_id === eventId)
+        (
+          !ticket.event_id ||
+          ticket.event_id === eventId
+        )
       ) {
-        uniqueTickets.set(ticket.ticket_id, ticket);
+        uniqueTickets.set(
+          ticket.ticket_id,
+          ticket
+        );
       }
     }
 
-    if (response.tickets.length < PAGE_SIZE) {
+    if (
+      response.tickets.length < TICKET_PAGE_SIZE
+    ) {
       complete = true;
       break;
     }
@@ -186,7 +274,7 @@ async function fetchTicketAvailability(eventId: string) {
 
   if (!complete) {
     throw new Error(
-      `Ticket pagination limit reached for event ${eventId}.`
+      `Ticket pagination limit reached for ${eventId}.`
     );
   }
 
@@ -197,83 +285,151 @@ async function fetchTicketAvailability(eventId: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
+
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.XS2EVENT_SYNC_ENABLED !== 'true'
   ) {
-    return NextResponse.json(
+    return json(
       { error: 'Synchronisation is not enabled.' },
-      { status: 404 }
+      404
     );
   }
 
   if (!isAuthorised(request)) {
-    return NextResponse.json(
+    return json(
       { error: 'Unauthorised.' },
-      { status: 401 }
+      401
+    );
+  }
+
+  const searchParams =
+    request.nextUrl.searchParams;
+
+  const sport =
+    searchParams.get('sport') || 'formula1';
+
+  const page = parseInteger(
+    searchParams.get('page'),
+    1,
+    1,
+    MAX_EVENT_PAGES
+  );
+
+  const offset = parseInteger(
+    searchParams.get('offset'),
+    0,
+    0,
+    EVENT_PAGE_SIZE - 1
+  );
+
+  if (
+    !SAFE_SPORT.test(sport) ||
+    page === null ||
+    offset === null
+  ) {
+    return json(
+      { error: 'Invalid synchronisation parameters.' },
+      400
     );
   }
 
   try {
-    const events = await fetchFormula1Events();
-
-    if (events.length > MAX_EVENTS_PER_RUN) {
-      return NextResponse.json(
-        {
-          error: 'Too many events for this initial test synchronisation.',
-          eventsFound: events.length,
-          maximumSupported: MAX_EVENTS_PER_RUN,
-        },
-        { status: 409 }
-      );
-    }
+    const supplierEvents =
+      await fetchEventPage(sport, page);
 
     const supabase = getSupabaseAdmin();
-    let savedEvents = 0;
-    let availabilityFailures = 0;
 
-    for (const event of events) {
-      if (!event.event_id || !event.event_name) {
+    let savedEvents = 0;
+    let skippedEvents = 0;
+    let availabilityFailures = 0;
+    let processedEvents = 0;
+
+    const failedAvailabilityEventIds: string[] = [];
+
+    let currentOffset = offset;
+
+    while (
+      currentOffset < supplierEvents.length &&
+      processedEvents < BATCH_SIZE
+    ) {
+      if (
+        Date.now() - startedAt >= RUN_BUDGET_MS
+      ) {
+        break;
+      }
+
+      const event =
+        supplierEvents[currentOffset];
+
+      if (
+        !isValidEvent(event, sport) ||
+        !event.event_id ||
+        !event.event_name
+      ) {
+        skippedEvents++;
+        currentOffset++;
+        processedEvents++;
         continue;
       }
 
-      let availability: {
-        hasAvailableTickets: boolean;
-        availableCategories: number;
-      } | null = null;
+      let availability: Availability | null = null;
 
       try {
-        availability = await fetchTicketAvailability(event.event_id);
+        availability =
+          await fetchTicketAvailability(
+            event.event_id,
+            startedAt
+          );
       } catch (error) {
         availabilityFailures++;
+
+        failedAvailabilityEventIds.push(
+          event.event_id
+        );
 
         console.error(
           '[XS2Event sync] Availability check failed:',
           event.event_id,
-          error instanceof Error ? error.message : 'Unknown error'
+          error instanceof Error
+            ? error.message
+            : 'Unknown error'
         );
       }
 
-      const checkedAt = new Date().toISOString();
+      const checkedAt =
+        new Date().toISOString();
 
       const record = {
+        source_environment: SOURCE_ENVIRONMENT,
         supplier_event_id: event.event_id,
-        sport_type: 'formula1',
+        sport_type: sport,
         event_name: event.event_name,
-        tournament_name: event.tournament_name ?? null,
-        venue_name: event.venue_name ?? null,
-        city: event.city ?? null,
-        iso_country: event.iso_country ?? null,
-        date_start: parseSupplierDate(event.date_start),
-        date_stop: parseSupplierDate(event.date_stop),
-        event_status: event.event_status ?? null,
+        tournament_name:
+          event.tournament_name ?? null,
+        venue_name:
+          event.venue_name ?? null,
+        city:
+          event.city ?? null,
+        iso_country:
+          event.iso_country ?? null,
+        date_start:
+          parseSupplierDate(event.date_start),
+        date_stop:
+          parseSupplierDate(event.date_stop),
+        event_status:
+          event.event_status ?? null,
         event_checked_at: checkedAt,
         updated_at: checkedAt,
         ...(availability
           ? {
-              has_available_tickets: availability.hasAvailableTickets,
-              available_categories: availability.availableCategories,
-              availability_checked_at: checkedAt,
+              has_available_tickets:
+                availability.hasAvailableTickets,
+              available_categories:
+                availability.availableCategories,
+              availability_checked_at:
+                checkedAt,
             }
           : {}),
       };
@@ -281,7 +437,8 @@ export async function GET(request: NextRequest) {
       const { error } = await supabase
         .from('xs2event_events')
         .upsert(record, {
-          onConflict: 'supplier_event_id',
+          onConflict:
+            'source_environment,supplier_event_id',
         });
 
       if (error) {
@@ -291,42 +448,78 @@ export async function GET(request: NextRequest) {
       }
 
       savedEvents++;
+      processedEvents++;
+      currentOffset++;
     }
 
-    return NextResponse.json(
-      {
-        testMode: true,
-        supplierEnvironment: 'test',
-        sport: 'Formula 1',
-        eventsFound: events.length,
-        eventsSaved: savedEvents,
-        availabilityFailures,
-        completedAt: new Date().toISOString(),
-        supplierReservationsCreated: false,
-        supplierOrdersCreated: false,
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store',
-        },
+    let nextCursor: {
+      sport: string;
+      page: number;
+      offset: number;
+    } | null = null;
+
+    let paginationLimitReached = false;
+
+    if (
+      currentOffset < supplierEvents.length
+    ) {
+      nextCursor = {
+        sport,
+        page,
+        offset: currentOffset,
+      };
+    } else if (
+      supplierEvents.length >= EVENT_PAGE_SIZE
+    ) {
+      if (page < MAX_EVENT_PAGES) {
+        nextCursor = {
+          sport,
+          page: page + 1,
+          offset: 0,
+        };
+      } else {
+        paginationLimitReached = true;
       }
-    );
+    }
+
+    return json({
+      testMode: true,
+      supplierEnvironment: SOURCE_ENVIRONMENT,
+      sport,
+      page,
+      offset,
+      batchSize: BATCH_SIZE,
+      eventsOnSupplierPage: supplierEvents.length,
+      eventsProcessed: processedEvents,
+      eventsSaved: savedEvents,
+      eventsSkipped: skippedEvents,
+      availabilityFailures,
+      failedAvailabilityEventIds,
+      nextCursor,
+      paginationLimitReached,
+      complete:
+        nextCursor === null &&
+        !paginationLimitReached &&
+        availabilityFailures === 0,
+      durationMs: Date.now() - startedAt,
+      completedAt: new Date().toISOString(),
+      supplierReservationsCreated: false,
+      supplierOrdersCreated: false,
+    });
   } catch (error) {
     console.error(
       '[XS2Event sync] Failed:',
-      error instanceof Error ? error.message : 'Unknown error'
+      error instanceof Error
+        ? error.message
+        : 'Unknown error'
     );
 
-    return NextResponse.json(
+    return json(
       {
-        error: 'XS2Event test synchronisation failed.',
+        error:
+          'XS2Event test synchronisation failed.',
       },
-      {
-        status: 503,
-        headers: {
-          'Cache-Control': 'no-store',
-        },
-      }
+      503
     );
   }
 }
