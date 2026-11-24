@@ -1,4 +1,3 @@
-
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -17,8 +16,11 @@ const EVENT_PAGE_SIZE = 50;
 const TICKET_PAGE_SIZE = 50;
 const MAX_TICKET_PAGES = 5;
 const MAX_EVENT_PAGES = 1000;
-const BATCH_SIZE = 3;
-const RUN_BUDGET_MS = 40000;
+
+const BATCH_SIZE = 10;
+const AVAILABILITY_CONCURRENCY = 3;
+const RUN_BUDGET_MS = 30000;
+const GROUP_START_LIMIT_MS = 15000;
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
 const SAFE_SPORT = /^[a-z0-9_-]{1,50}$/;
@@ -56,6 +58,32 @@ type Availability = {
   availableCategories: number;
 };
 
+type EventRecord = {
+  source_environment: string;
+  supplier_event_id: string;
+  sport_type: string;
+  event_name: string;
+  tournament_name: string | null;
+  venue_name: string | null;
+  city: string | null;
+  iso_country: string | null;
+  date_start: string | null;
+  date_stop: string | null;
+  event_status: string | null;
+  event_checked_at: string;
+  updated_at: string;
+  has_available_tickets?: boolean;
+  available_categories?: number;
+  availability_checked_at?: string;
+};
+
+type EventResult = {
+  record: EventRecord | null;
+  skipped: boolean;
+  availabilityFailed: boolean;
+  failedEventId: string | null;
+};
+
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, {
     status,
@@ -79,7 +107,11 @@ function isAuthorised(request: NextRequest): boolean {
     return false;
   }
 
-  const expected = Buffer.from(configuredSecret, 'utf8');
+  const expected = Buffer.from(
+    configuredSecret,
+    'utf8'
+  );
+
   const provided = Buffer.from(
     authorization.slice(7),
     'utf8'
@@ -92,7 +124,9 @@ function isAuthorised(request: NextRequest): boolean {
   return timingSafeEqual(expected, provided);
 }
 
-function parseSupplierDate(value?: string): string | null {
+function parseSupplierDate(
+  value?: string
+): string | null {
   if (!value) return null;
 
   const timestamp = Date.parse(value);
@@ -156,7 +190,9 @@ function isValidEvent(
   }
 
   if (
-    /\b(test|dummy|sample)\b/i.test(event.event_name)
+    /\b(test|dummy|sample)\b/i.test(
+      event.event_name
+    )
   ) {
     return false;
   }
@@ -176,7 +212,9 @@ function isValidEvent(
 
 function checkRunBudget(startedAt: number) {
   if (Date.now() - startedAt >= RUN_BUDGET_MS) {
-    throw new Error('Synchronisation time budget reached.');
+    throw new Error(
+      'Synchronisation time budget reached.'
+    );
   }
 }
 
@@ -284,6 +322,90 @@ async function fetchTicketAvailability(
   };
 }
 
+async function processEvent(
+  event: SupplierEvent,
+  sport: string,
+  startedAt: number
+): Promise<EventResult> {
+  if (
+    !isValidEvent(event, sport) ||
+    !event.event_id ||
+    !event.event_name
+  ) {
+    return {
+      record: null,
+      skipped: true,
+      availabilityFailed: false,
+      failedEventId: null,
+    };
+  }
+
+  let availability: Availability | null = null;
+  let availabilityFailed = false;
+
+  try {
+    availability =
+      await fetchTicketAvailability(
+        event.event_id,
+        startedAt
+      );
+  } catch (error) {
+    availabilityFailed = true;
+
+    console.error(
+      '[XS2Event sync] Availability check failed:',
+      event.event_id,
+      error instanceof Error
+        ? error.message
+        : 'Unknown error'
+    );
+  }
+
+  const checkedAt = new Date().toISOString();
+
+  const record: EventRecord = {
+    source_environment: SOURCE_ENVIRONMENT,
+    supplier_event_id: event.event_id,
+    sport_type: sport,
+    event_name: event.event_name,
+    tournament_name:
+      event.tournament_name ?? null,
+    venue_name:
+      event.venue_name ?? null,
+    city:
+      event.city ?? null,
+    iso_country:
+      event.iso_country ?? null,
+    date_start:
+      parseSupplierDate(event.date_start),
+    date_stop:
+      parseSupplierDate(event.date_stop),
+    event_status:
+      event.event_status ?? null,
+    event_checked_at: checkedAt,
+    updated_at: checkedAt,
+    ...(availability
+      ? {
+          has_available_tickets:
+            availability.hasAvailableTickets,
+          available_categories:
+            availability.availableCategories,
+          availability_checked_at:
+            checkedAt,
+        }
+      : {}),
+  };
+
+  return {
+    record,
+    skipped: false,
+    availabilityFailed,
+    failedEventId: availabilityFailed
+      ? event.event_id
+      : null,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const startedAt = Date.now();
 
@@ -345,101 +467,119 @@ export async function GET(request: NextRequest) {
     let skippedEvents = 0;
     let availabilityFailures = 0;
     let processedEvents = 0;
+    let databaseWrites = 0;
 
     const failedAvailabilityEventIds: string[] = [];
 
+    const recordsWithAvailability =
+      new Map<string, EventRecord>();
+
+    const recordsWithoutAvailability =
+      new Map<string, EventRecord>();
+
     let currentOffset = offset;
 
-    while (
-      currentOffset < supplierEvents.length &&
-      processedEvents < BATCH_SIZE
-    ) {
+    const batchEnd = Math.min(
+      supplierEvents.length,
+      offset + BATCH_SIZE
+    );
+
+    while (currentOffset < batchEnd) {
+      checkRunBudget(startedAt);
+
       if (
-        Date.now() - startedAt >= RUN_BUDGET_MS
+        processedEvents > 0 &&
+        Date.now() - startedAt >= GROUP_START_LIMIT_MS
       ) {
         break;
       }
 
-      const event =
-        supplierEvents[currentOffset];
+      const groupEnd = Math.min(
+        currentOffset + AVAILABILITY_CONCURRENCY,
+        batchEnd
+      );
 
-      if (
-        !isValidEvent(event, sport) ||
-        !event.event_id ||
-        !event.event_name
-      ) {
-        skippedEvents++;
-        currentOffset++;
-        processedEvents++;
-        continue;
-      }
+      const group = supplierEvents.slice(
+        currentOffset,
+        groupEnd
+      );
 
-      let availability: Availability | null = null;
-
-      try {
-        availability =
-          await fetchTicketAvailability(
-            event.event_id,
+      const results = await Promise.all(
+        group.map((event) =>
+          processEvent(
+            event,
+            sport,
             startedAt
+          )
+        )
+      );
+
+      for (const result of results) {
+        processedEvents++;
+
+        if (result.skipped) {
+          skippedEvents++;
+          continue;
+        }
+
+        if (result.availabilityFailed) {
+          availabilityFailures++;
+
+          if (result.failedEventId) {
+            failedAvailabilityEventIds.push(
+              result.failedEventId
+            );
+          }
+        }
+
+        if (!result.record) {
+          continue;
+        }
+
+        const eventId =
+          result.record.supplier_event_id;
+
+        if (result.availabilityFailed) {
+          if (!recordsWithAvailability.has(eventId)) {
+            recordsWithoutAvailability.set(
+              eventId,
+              result.record
+            );
+          }
+        } else {
+          recordsWithoutAvailability.delete(eventId);
+
+          recordsWithAvailability.set(
+            eventId,
+            result.record
           );
-      } catch (error) {
-        availabilityFailures++;
+        }
 
-        failedAvailabilityEventIds.push(
-          event.event_id
-        );
-
-        console.error(
-          '[XS2Event sync] Availability check failed:',
-          event.event_id,
-          error instanceof Error
-            ? error.message
-            : 'Unknown error'
-        );
+        savedEvents++;
       }
 
-      const checkedAt =
-        new Date().toISOString();
+      currentOffset = groupEnd;
 
-      const record = {
-        source_environment: SOURCE_ENVIRONMENT,
-        supplier_event_id: event.event_id,
-        sport_type: sport,
-        event_name: event.event_name,
-        tournament_name:
-          event.tournament_name ?? null,
-        venue_name:
-          event.venue_name ?? null,
-        city:
-          event.city ?? null,
-        iso_country:
-          event.iso_country ?? null,
-        date_start:
-          parseSupplierDate(event.date_start),
-        date_stop:
-          parseSupplierDate(event.date_stop),
-        event_status:
-          event.event_status ?? null,
-        event_checked_at: checkedAt,
-        updated_at: checkedAt,
-        ...(availability
-          ? {
-              has_available_tickets:
-                availability.hasAvailableTickets,
-              available_categories:
-                availability.availableCategories,
-              availability_checked_at:
-                checkedAt,
-            }
-          : {}),
-      };
+      if (availabilityFailures > 0) {
+        break;
+      }
+    }
 
+    checkRunBudget(startedAt);
+
+    if (recordsWithAvailability.size > 0) {
       const { error } = await supabase
         .from('xs2event_events')
-        .upsert(record, {
-          onConflict:
-            'source_environment,supplier_event_id',
-        });
+        .upsert(
+          Array.from(
+            recordsWithAvailability.values()
+          ),
+          {
+            onConflict:
+              'source_environment,supplier_event_id',
+            defaultToNull: false,
+          }
+        );
 
       if (error) {
         throw new Error(
@@ -447,9 +587,30 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      savedEvents++;
-      processedEvents++;
-      currentOffset++;
+      databaseWrites++;
+    }
+
+    if (recordsWithoutAvailability.size > 0) {
+      const { error } = await supabase
+        .from('xs2event_events')
+        .upsert(
+          Array.from(
+            recordsWithoutAvailability.values()
+          ),
+          {
+            onConflict:
+              'source_environment,supplier_event_id',
+            defaultToNull: false,
+          }
+        );
+
+      if (error) {
+        throw new Error(
+          `Supabase event metadata update failed: ${error.message}`
+        );
+      }
+
+      databaseWrites++;
     }
 
     let nextCursor: {
@@ -460,9 +621,7 @@ export async function GET(request: NextRequest) {
 
     let paginationLimitReached = false;
 
-    if (
-      currentOffset < supplierEvents.length
-    ) {
+    if (currentOffset < supplierEvents.length) {
       nextCursor = {
         sport,
         page,
@@ -489,7 +648,11 @@ export async function GET(request: NextRequest) {
       page,
       offset,
       batchSize: BATCH_SIZE,
-      eventsOnSupplierPage: supplierEvents.length,
+      availabilityConcurrency:
+        AVAILABILITY_CONCURRENCY,
+      databaseWrites,
+      eventsOnSupplierPage:
+        supplierEvents.length,
       eventsProcessed: processedEvents,
       eventsSaved: savedEvents,
       eventsSkipped: skippedEvents,
