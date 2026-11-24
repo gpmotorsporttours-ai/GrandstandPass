@@ -11,7 +11,7 @@ export const maxDuration = 60;
 const ENVIRONMENT = 'test';
 const TABLE = 'xs2event_sync_progress';
 
-const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_DURATION_MS = 120 * 1000;
 const BATCH_TIMEOUT_MS = 40 * 1000;
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
@@ -370,6 +370,7 @@ export async function GET(request: NextRequest) {
         supplierEnvironment: ENVIRONMENT,
         mode: 'controller',
         status: 'idle',
+        refreshIntervalMinutes: 5,
         message: 'No eligible batch is currently due.',
         supplierReservationsCreated: false,
         supplierOrdersCreated: false,
@@ -518,6 +519,7 @@ export async function GET(request: NextRequest) {
           testMode: true,
           supplierEnvironment: ENVIRONMENT,
           mode: 'controller',
+          refreshIntervalMinutes: 5,
           sport: row.sport_type,
           cycleId,
           status: batch.complete
@@ -605,6 +607,7 @@ export async function GET(request: NextRequest) {
             testMode: true,
             supplierEnvironment: ENVIRONMENT,
             mode: 'controller',
+            refreshIntervalMinutes: 5,
             sport: row.sport_type,
             status: 'failed',
             page,
@@ -627,6 +630,7 @@ export async function GET(request: NextRequest) {
       testMode: true,
       supplierEnvironment: ENVIRONMENT,
       mode: 'controller',
+      refreshIntervalMinutes: 5,
       status: 'busy',
       message:
         'Eligible batches are already being processed.',
