@@ -2,7 +2,6 @@ import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
-
 import {
   xs2eventGet,
   XS2EventAPIError,
@@ -15,8 +14,48 @@ export const maxDuration = 60;
 const PAGE_SIZE = 50;
 const MAX_REQUESTS = 30;
 const RUN_BUDGET_MS = 35000;
-
 const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
+
+const FOOTBALL_TEST_EVENTS = [
+  {
+    eventId: 'b510b501a1dc45dc969100375735ad2f_gnr',
+    eventName: 'Napoli vs Fiorentina',
+  },
+  {
+    eventId: 'f585a42ee1f444f79fdb240262cb2134_gnr',
+    eventName: 'AC Milan vs Torino',
+  },
+  {
+    eventId: 'f02edd18c1da4eb088da984eb6a8a89a_gnr',
+    eventName: 'Lazio Roma vs Bologna',
+  },
+  {
+    eventId: 'b0a306ded5e14363a66f6041d1544316_gnr',
+    eventName: 'Juventus FC vs Genoa',
+  },
+  {
+    eventId: 'ae8a7c1e8fcf44d688d541014a92c435_gnr',
+    eventName: 'Atalanta vs AS Roma',
+  },
+];
+
+const ALLOWED_SPORTS = [
+  'formula1',
+  'motogp',
+  'soccer',
+  'tennis',
+  'basketball',
+  'nba',
+  'golf',
+  'horseracing',
+  'nfl',
+  'rugby',
+];
+
+type SelectedEvent = {
+  eventId: string;
+  eventName: string;
+};
 
 type SupplierEvent = {
   event_id?: string;
@@ -59,7 +98,6 @@ type TicketSnapshot = {
   netRate: number | null;
   currency: string | null;
   status: string | null;
-  updated: string | null;
 };
 
 function json(data: unknown, status = 200) {
@@ -71,7 +109,7 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function isAuthorised(request: NextRequest): boolean {
+function isAuthorised(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
 
   if (!secret || secret.length < 32) {
@@ -79,7 +117,6 @@ function isAuthorised(request: NextRequest): boolean {
   }
 
   const expected = Buffer.from(`Bearer ${secret}`);
-
   const provided = Buffer.from(
     request.headers.get('authorization') ?? ''
   );
@@ -140,21 +177,30 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get('sport') ||
     'formula1';
 
-  const allowedSports = [
-    'formula1',
-    'motogp',
-    'soccer',
-    'tennis',
-    'basketball',
-    'nba',
-    'golf',
-    'horseracing',
-    'nfl',
-    'rugby',
-  ];
-
-  if (!allowedSports.includes(sport)) {
+  if (!ALLOWED_SPORTS.includes(sport)) {
     return json({ error: 'Invalid sport.' }, 400);
+  }
+
+  const requestedIds =
+    request.nextUrl.searchParams.get('eventIds');
+
+  let customIds: string[] = [];
+
+  if (requestedIds !== null) {
+    customIds = requestedIds
+      .split(',')
+      .map((id) => id.trim());
+
+    if (
+      customIds.length < 2 ||
+      customIds.length > 20 ||
+      customIds.some((id) => !SAFE_ID.test(id)) ||
+      new Set(customIds).size !== customIds.length
+    ) {
+      return json({
+        error: 'Provide between 2 and 20 unique valid event IDs.',
+      }, 400);
+    }
   }
 
   let supplierRequests = 0;
@@ -188,7 +234,6 @@ export async function GET(request: NextRequest) {
   ) {
     const started = Date.now();
     const tickets = new Map<string, TicketSnapshot>();
-
     const allowed = new Set(allowedEventIds);
 
     let pages = 0;
@@ -276,27 +321,35 @@ export async function GET(request: NextRequest) {
               : null,
           currency: ticket.currency_code ?? null,
           status: ticket.ticket_status ?? null,
-          updated: ticket.updated ?? null,
         });
       }
 
-      if (
-        response.tickets.length === 0 ||
-        (
-          reportedTotal !== null &&
-          rawTickets >= reportedTotal
-        ) ||
-        response.pagination?.next_page === '' ||
-        response.pagination?.next_page === null
-      ) {
-        complete = true;
-        break;
-      }
+      const nextPage =
+        response.pagination?.next_page;
 
-      if (
-        reportedTotal === null &&
-        response.pagination?.next_page === undefined &&
-        response.tickets.length < PAGE_SIZE
+      if (reportedTotal !== null) {
+        if (rawTickets === reportedTotal) {
+          complete =
+            !nextPage;
+          break;
+        }
+
+        if (
+          rawTickets > reportedTotal ||
+          response.tickets.length === 0 ||
+          nextPage === '' ||
+          nextPage === null
+        ) {
+          complete = false;
+          break;
+        }
+      } else if (
+        nextPage === '' ||
+        nextPage === null ||
+        (
+          nextPage === undefined &&
+          response.tickets.length < PAGE_SIZE
+        )
       ) {
         complete = true;
         break;
@@ -318,79 +371,101 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const today = new Date()
-      .toISOString()
-      .slice(0, 10);
+    let selectedEvents: SelectedEvent[] = [];
+    let supplierEventTotal: number | null = null;
+    let selectionMode = 'automatic';
 
-    const eventParams = new URLSearchParams({
-      sport_type: sport,
-      date_stop: `ge:${today}`,
-      sorting: 'date_start:asc',
-      page_size: '50',
-      page: '1',
-    });
+    if (customIds.length > 0) {
+      selectionMode = 'explicit_event_ids';
 
-    const eventResponse =
-      await supplierGet<EventsResponse>(
-        `/events?${eventParams.toString()}`
+      selectedEvents = customIds.map(
+        (eventId) => ({
+          eventId,
+          eventName:
+            FOOTBALL_TEST_EVENTS.find(
+              (event) =>
+                event.eventId === eventId
+            )?.eventName ?? eventId,
+        })
       );
+    } else if (sport === 'soccer') {
+      selectionMode = 'known_football_events';
 
-    if (!Array.isArray(eventResponse.events)) {
-      throw new Error(
-        'Unexpected events response.'
-      );
-    }
+      selectedEvents = FOOTBALL_TEST_EVENTS;
+    } else {
+      const today = new Date()
+        .toISOString()
+        .slice(0, 10);
 
-    const selectedEvents: {
-      eventId: string;
-      eventName: string;
-    }[] = [];
-
-    const seen = new Set<string>();
-
-    for (const event of eventResponse.events) {
-      if (
-        !event.event_id ||
-        !SAFE_ID.test(event.event_id) ||
-        !event.event_name ||
-        event.event_status !== 'notstarted' ||
-        seen.has(event.event_id) ||
-        /\b(test|dummy|sample)\b/i.test(
-          event.event_name
-        ) ||
-        (
-          event.sport_type &&
-          event.sport_type !== sport
-        )
-      ) {
-        continue;
-      }
-
-      if (
-        sport === 'formula1' &&
-        (
-          !/grand prix/i.test(event.event_name) ||
-          /atp tour|motogp/i.test(event.event_name)
-        )
-      ) {
-        continue;
-      }
-
-      seen.add(event.event_id);
-
-      selectedEvents.push({
-        eventId: event.event_id,
-        eventName: event.event_name,
+      const eventParams = new URLSearchParams({
+        sport_type: sport,
+        date_stop: `ge:${today}`,
+        sorting: 'date_start:asc',
+        page_size: '50',
+        page: '1',
       });
 
-      if (selectedEvents.length === 5) {
-        break;
+      const eventResponse =
+        await supplierGet<EventsResponse>(
+          `/events?${eventParams.toString()}`
+        );
+
+      if (!Array.isArray(eventResponse.events)) {
+        throw new Error(
+          'Unexpected events response.'
+        );
+      }
+
+      supplierEventTotal =
+        eventResponse.pagination?.total_size ??
+        null;
+
+      const seen = new Set<string>();
+
+      for (const event of eventResponse.events) {
+        if (
+          !event.event_id ||
+          !SAFE_ID.test(event.event_id) ||
+          !event.event_name ||
+          event.event_status !== 'notstarted' ||
+          seen.has(event.event_id) ||
+          /\b(test|dummy|sample)\b/i.test(
+            event.event_name
+          ) ||
+          (
+            event.sport_type &&
+            event.sport_type !== sport
+          )
+        ) {
+          continue;
+        }
+
+        if (
+          sport === 'formula1' &&
+          (
+            !/grand prix/i.test(event.event_name) ||
+            /atp tour|motogp/i.test(event.event_name)
+          )
+        ) {
+          continue;
+        }
+
+        seen.add(event.event_id);
+
+        selectedEvents.push({
+          eventId: event.event_id,
+          eventName: event.event_name,
+        });
+
+        if (selectedEvents.length === 5) {
+          break;
+        }
       }
     }
 
     if (selectedEvents.length < 2) {
       throw new Error(
-        'Not enough valid events for bulk comparison.'
+        'Not enough valid events for comparison.'
       );
     }
 
@@ -453,7 +528,8 @@ export async function GET(request: NextRequest) {
       (event) => event.eventId
     );
 
-    const requestsBeforeBulk = supplierRequests;
+    const requestsBeforeBulk =
+      supplierRequests;
 
     const bulk = await getTickets(
       `in:[${eventIds.join(',')}]`,
@@ -471,14 +547,9 @@ export async function GET(request: NextRequest) {
     let statusDifferences = 0;
     let invalidComparableFields = 0;
 
-    const ticketsPerEvent = eventIds.map(
-      (eventId) => ({
-        eventId,
-        eventName:
-          selectedEvents.find(
-            (event) =>
-              event.eventId === eventId
-          )?.eventName ?? '',
+    const ticketsPerEvent = selectedEvents.map(
+      (event) => ({
+        ...event,
         individual: 0,
         bulk: 0,
       })
@@ -590,11 +661,9 @@ export async function GET(request: NextRequest) {
       supplierEnvironment: 'test',
       mode: 'read_only_bulk_diagnostic',
       sport,
+      selectionMode,
       selectedEvents: selectedEvents.length,
-
-      supplierEventTotal:
-        eventResponse.pagination?.total_size ??
-        null,
+      supplierEventTotal,
 
       individual: {
         requests: individualRequestCount,
@@ -614,9 +683,12 @@ export async function GET(request: NextRequest) {
         complete: bulk.complete,
         unexpectedEventIds:
           bulk.unexpectedEventIds,
-        missingEventIds: bulk.missingEventIds,
-        invalidTicketIds: bulk.invalidTicketIds,
-        duplicateTickets: bulk.duplicateTickets,
+        missingEventIds:
+          bulk.missingEventIds,
+        invalidTicketIds:
+          bulk.invalidTicketIds,
+        duplicateTickets:
+          bulk.duplicateTickets,
         eventsWithTickets:
           eventsWithBulkTickets,
         durationMs: bulk.durationMs,
