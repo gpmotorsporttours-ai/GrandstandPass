@@ -403,6 +403,25 @@ async function fetchBulkTicketAvailability(
         );
       }
 
+      if (seenTicketIds.has(ticketId)) {
+        throw new Error(
+          'Duplicate ticket detected during bulk pagination.'
+        );
+      }
+
+      seenTicketIds.set(ticketId, eventId);
+
+      // Count all returned records for pagination and duplicate validation,
+      // but never count explicitly non-available, zero-stock tickets as offers.
+      if (
+        typeof ticket.ticket_status === 'string' &&
+        ticket.ticket_status.trim().length > 0 &&
+        ticket.ticket_status !== 'available' &&
+        ticket.stock === 0
+      ) {
+        continue;
+      }
+
       if (
         ticket.ticket_status !== 'available' ||
         !Number.isSafeInteger(ticket.stock) ||
@@ -412,14 +431,6 @@ async function fetchBulkTicketAvailability(
           `Bulk response contains unexpected ticket availability: statusAvailable=${ticket.ticket_status === 'available'}, stockType=${typeof ticket.stock}, stockInteger=${Number.isSafeInteger(ticket.stock)}, stockPositive=${typeof ticket.stock === 'number' && ticket.stock > 0}.`
         );
       }
-
-      if (seenTicketIds.has(ticketId)) {
-        throw new Error(
-          'Duplicate ticket detected during bulk pagination.'
-        );
-      }
-
-      seenTicketIds.set(ticketId, eventId);
 
       ticketsByEvent.get(eventId)!.add(ticketId);
     }
