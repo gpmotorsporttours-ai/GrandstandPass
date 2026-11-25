@@ -409,7 +409,7 @@ async function fetchBulkTicketAvailability(
         (ticket.stock ?? 0) <= 0
       ) {
         throw new Error(
-          'Bulk response contains unexpected ticket availability.'
+          `Bulk response contains unexpected ticket availability: statusAvailable=${ticket.ticket_status === 'available'}, stockType=${typeof ticket.stock}, stockInteger=${Number.isSafeInteger(ticket.stock)}, stockPositive=${typeof ticket.stock === 'number' && ticket.stock > 0}.`
         );
       }
 
@@ -513,6 +513,39 @@ async function fetchBulkTicketAvailability(
     requests,
     tickets: seenTicketIds.size,
   };
+}
+
+// Split only invalid inventory responses, not network or rate-limit failures.
+// Keep the original batch retry contract if any individual event remains invalid.
+async function fetchAvailabilityWithFallback(
+  eventIds: string[],
+  startedAt: number
+): Promise<BulkAvailabilityResult> {
+  try {
+    return await fetchBulkTicketAvailability(eventIds, startedAt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      eventIds.length <= 1 ||
+      !message.startsWith('Bulk response contains unexpected ticket availability:') ||
+      Date.now() - startedAt >= GROUP_START_LIMIT_MS
+    ) {
+      throw error;
+    }
+    console.warn('[XS2Event sync] Splitting invalid availability group:',
+      eventIds.length, message);
+    const midpoint = Math.ceil(eventIds.length / 2);
+    const left = await fetchAvailabilityWithFallback(eventIds.slice(0, midpoint), startedAt);
+    if (Date.now() - startedAt >= GROUP_START_LIMIT_MS) {
+      throw new Error('Fallback time budget reached; batch will be retried.');
+    }
+    const right = await fetchAvailabilityWithFallback(eventIds.slice(midpoint), startedAt);
+    return {
+      availability: new Map([...left.availability, ...right.availability]),
+      requests: left.requests + right.requests,
+      tickets: left.tickets + right.tickets,
+    };
+  }
 }
 
 function buildEventRecord(
@@ -683,8 +716,8 @@ export async function GET(request: NextRequest) {
 
       try {
         result =
-          await fetchBulkTicketAvailability(
-            eventIds,
+          await fetchAvailabilityWithFallback(
+            Array.from(new Set(eventIds)),
             startedAt
           );
 
