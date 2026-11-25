@@ -13,6 +13,7 @@ const ENVIRONMENT = 'test';
 const TABLE = 'xs2event_sync_progress';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SCHEDULING_TOLERANCE_MS = 15 * 1000;
 const LOCK_DURATION_MS = 120 * 1000;
 const BATCH_TIMEOUT_MS = 40 * 1000;
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
@@ -149,7 +150,8 @@ function isEligible(
 
     return (
       !Number.isFinite(previousStartMs) ||
-      now - previousStartMs >= REFRESH_INTERVAL_MS
+      now - previousStartMs >=
+        REFRESH_INTERVAL_MS - SCHEDULING_TOLERANCE_MS
     );
   }
 
