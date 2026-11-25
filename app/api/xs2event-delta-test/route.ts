@@ -28,6 +28,9 @@ type SupplierRecord = {
   currency_code?: string;
   updated?: string;
   created?: string;
+  deleted?: boolean | string | null;
+  deleted_at?: string | null;
+  is_deleted?: boolean;
 };
 
 type SupplierResponse = {
@@ -125,7 +128,7 @@ async function runDiagnostic(
         },
         cache: 'no-store',
         redirect: 'error',
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(8000),
       }
     );
 
@@ -169,6 +172,13 @@ async function runDiagnostic(
       number
     > = {};
 
+    const updatedDateCounts: Record<
+      string,
+      number
+    > = {};
+
+    const fieldNames = new Set<string>();
+
     for (const record of records) {
       const status =
         test.resource === 'events'
@@ -177,7 +187,44 @@ async function runDiagnostic(
 
       statusCounts[status] =
         (statusCounts[status] ?? 0) + 1;
+
+      for (const key of Object.keys(record)) {
+        fieldNames.add(key);
+      }
+
+      if (
+        typeof record.updated === 'string' &&
+        /^\d{4}-\d{2}-\d{2}/.test(
+          record.updated
+        )
+      ) {
+        const date = record.updated.slice(
+          0,
+          10
+        );
+
+        updatedDateCounts[date] =
+          (updatedDateCounts[date] ?? 0) + 1;
+      }
     }
+
+    const requestedUpdatedDate =
+      test.filters.updated?.match(
+        /^ge:(\d{4}-\d{2}-\d{2})/
+      )?.[1] ?? null;
+
+    const recordsBeforeRequestedDate =
+      requestedUpdatedDate === null
+        ? null
+        : records.filter(
+            (record) =>
+              typeof record.updated === 'string' &&
+              /^\d{4}-\d{2}-\d{2}/.test(
+                record.updated
+              ) &&
+              record.updated.slice(0, 10) <
+                requestedUpdatedDate
+          ).length;
 
     return {
       name: test.name,
@@ -193,11 +240,16 @@ async function runDiagnostic(
         data.pagination?.next_page
       ),
       statusCounts,
+      updatedDateCounts,
+      requestedUpdatedDate,
+      recordsBeforeRequestedDate,
       recordsWithUpdatedTimestamp:
         records.filter(
           (record) =>
             typeof record.updated === 'string'
         ).length,
+      availableFieldNames:
+        Array.from(fieldNames).sort(),
       sampleRecords: records
         .slice(0, 2)
         .map((record) => ({
@@ -213,6 +265,9 @@ async function runDiagnostic(
             record.currency_code ?? null,
           updated: record.updated ?? null,
           created: record.created ?? null,
+          deleted: record.deleted ?? null,
+          deletedAt: record.deleted_at ?? null,
+          isDeleted: record.is_deleted ?? null,
         })),
     };
   } catch (error) {
@@ -285,73 +340,102 @@ export async function GET(
     startedAt - minutes * 60 * 1000
   ).toISOString();
 
-  const sinceWithoutTimezone =
-    sinceIso.slice(0, 19);
+  const todayUtc = new Date(
+    startedAt
+  ).toISOString().slice(0, 10);
 
-  const sinceWithTimezone =
-    `${sinceWithoutTimezone}Z`;
+  const yesterdayUtc = new Date(
+    startedAt - 24 * 60 * 60 * 1000
+  ).toISOString().slice(0, 10);
+
+  const sinceDate = sinceIso.slice(0, 10);
+
+  const midnightWithoutTimezone =
+    `${sinceDate}T00:00:00`;
+
+  const midnightWithTimezone =
+    `${sinceDate}T00:00:00Z`;
 
   const tests: DiagnosticTest[] = [
     {
-      name: 'events_baseline',
+      name: 'events_updated_date_only',
       resource: 'events',
       filters: {
         sport_type: 'soccer',
+        updated: `ge:${sinceDate}`,
       },
     },
     {
-      name: 'events_updated_original',
+      name: 'tickets_updated_date_only',
+      resource: 'tickets',
+      filters: {
+        sport_type: 'soccer',
+        updated: `ge:${sinceDate}`,
+      },
+    },
+    {
+      name: 'events_updated_midnight',
       resource: 'events',
       filters: {
         sport_type: 'soccer',
-        updated: `ge:${sinceWithoutTimezone}`,
+        updated: `ge:${midnightWithoutTimezone}`,
       },
     },
     {
-      name: 'events_updated_utc',
+      name: 'tickets_updated_midnight',
+      resource: 'tickets',
+      filters: {
+        sport_type: 'soccer',
+        updated: `ge:${midnightWithoutTimezone}`,
+      },
+    },
+    {
+      name: 'events_updated_midnight_utc',
       resource: 'events',
       filters: {
         sport_type: 'soccer',
-        updated: `ge:${sinceWithTimezone}`,
+        updated: `ge:${midnightWithTimezone}`,
       },
     },
     {
-      name: 'tickets_baseline',
+      name: 'tickets_updated_midnight_utc',
       resource: 'tickets',
       filters: {
         sport_type: 'soccer',
+        updated: `ge:${midnightWithTimezone}`,
       },
     },
     {
-      name: 'tickets_updated_original',
-      resource: 'tickets',
+      name: 'events_updated_yesterday',
+      resource: 'events',
       filters: {
         sport_type: 'soccer',
-        updated: `ge:${sinceWithoutTimezone}`,
+        updated: `ge:${yesterdayUtc}`,
       },
     },
     {
-      name: 'tickets_updated_utc',
+      name: 'tickets_updated_yesterday',
       resource: 'tickets',
       filters: {
         sport_type: 'soccer',
-        updated: `ge:${sinceWithTimezone}`,
+        updated: `ge:${yesterdayUtc}`,
       },
     },
     {
-      name: 'tickets_show_deleted',
+      name: 'tickets_updated_date_with_deleted',
       resource: 'tickets',
       filters: {
         sport_type: 'soccer',
+        updated: `ge:${sinceDate}`,
         show_deleted: 'true',
       },
     },
     {
-      name: 'tickets_original_combined',
+      name: 'tickets_updated_yesterday_with_deleted',
       resource: 'tickets',
       filters: {
         sport_type: 'soccer',
-        updated: `ge:${sinceWithoutTimezone}`,
+        updated: `ge:${yesterdayUtc}`,
         show_deleted: 'true',
       },
     },
@@ -384,10 +468,13 @@ export async function GET(
     ),
     testMode: true,
     supplierEnvironment: 'test',
-    mode: 'incremental_filter_diagnostic',
+    mode: 'date_only_incremental_diagnostic',
     sport: 'soccer',
     lookbackMinutes: minutes,
     updatedSinceUtc: sinceIso,
+    todayUtc,
+    yesterdayUtc,
+    testedDate: sinceDate,
     testsExecuted: results.length,
     testsPassed: results.filter(
       (result) => result.ok
