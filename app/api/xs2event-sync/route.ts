@@ -14,13 +14,14 @@ const SOURCE_ENVIRONMENT = 'test';
 
 const EVENT_PAGE_SIZE = 50;
 const TICKET_PAGE_SIZE = 50;
-const MAX_TICKET_PAGES = 5;
 const MAX_EVENT_PAGES = 1000;
+const MAX_BULK_TICKET_PAGES = 30;
 
-const BATCH_SIZE = 10;
-const AVAILABILITY_CONCURRENCY = 3;
+const BATCH_SIZE = 50;
+const BULK_GROUP_SIZE = 10;
+
 const RUN_BUDGET_MS = 30000;
-const GROUP_START_LIMIT_MS = 15000;
+const GROUP_START_LIMIT_MS = 12000;
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
 const SAFE_SPORT = /^[a-z0-9_-]{1,50}$/;
@@ -51,11 +52,23 @@ type SupplierTicket = {
 
 type SupplierTicketsResponse = {
   tickets?: SupplierTicket[];
+  pagination?: {
+    total_size?: number;
+    page_size?: number;
+    page_number?: number;
+    next_page?: string | null;
+  };
 };
 
 type Availability = {
   hasAvailableTickets: boolean;
   availableCategories: number;
+};
+
+type BulkAvailabilityResult = {
+  availability: Map<string, Availability>;
+  requests: number;
+  tickets: number;
 };
 
 type EventRecord = {
@@ -75,13 +88,6 @@ type EventRecord = {
   has_available_tickets?: boolean;
   available_categories?: number;
   availability_checked_at?: string;
-};
-
-type EventResult = {
-  record: EventRecord | null;
-  skipped: boolean;
-  availabilityFailed: boolean;
-  failedEventId: string | null;
 };
 
 function json(data: unknown, status = 200) {
@@ -239,7 +245,10 @@ async function fetchEventPage(
       `/events?${params.toString()}`
     );
 
-  if (!Array.isArray(response.events)) {
+  if (
+    !Array.isArray(response.events) ||
+    response.events.length > EVENT_PAGE_SIZE
+  ) {
     throw new Error(
       'Unexpected XS2Event events response.'
     );
@@ -248,126 +257,276 @@ async function fetchEventPage(
   return response.events;
 }
 
-async function fetchTicketAvailability(
-  eventId: string,
+async function fetchBulkTicketAvailability(
+  eventIds: string[],
   startedAt: number
-): Promise<Availability> {
-  const uniqueTickets =
-    new Map<string, SupplierTicket>();
+): Promise<BulkAvailabilityResult> {
+  const uniqueEventIds = Array.from(
+    new Set(eventIds)
+  );
 
+  const availability =
+    new Map<string, Availability>();
+
+  if (uniqueEventIds.length === 0) {
+    return {
+      availability,
+      requests: 0,
+      tickets: 0,
+    };
+  }
+
+  if (
+    uniqueEventIds.length > BULK_GROUP_SIZE ||
+    uniqueEventIds.some(
+      (eventId) => !SAFE_ID.test(eventId)
+    )
+  ) {
+    throw new Error(
+      'Invalid bulk availability event IDs.'
+    );
+  }
+
+  const requestedEventIds =
+    new Set(uniqueEventIds);
+
+  const ticketsByEvent =
+    new Map<string, Set<string>>();
+
+  for (const eventId of uniqueEventIds) {
+    ticketsByEvent.set(
+      eventId,
+      new Set<string>()
+    );
+  }
+
+  let requests = 0;
   let complete = false;
+  let rawTickets = 0;
+  let expectedTotal: number | null = null;
+
+  const seenTicketIds =
+    new Map<string, string>();
 
   for (
     let page = 1;
-    page <= MAX_TICKET_PAGES;
+    page <= MAX_BULK_TICKET_PAGES;
     page++
   ) {
     checkRunBudget(startedAt);
 
     const params = new URLSearchParams({
-      event_id: eventId,
+      event_id:
+        uniqueEventIds.length === 1
+          ? uniqueEventIds[0]
+          : `in:[${uniqueEventIds.join(',')}]`,
       ticket_status: 'available',
       stock: 'gt:0',
       page_size: String(TICKET_PAGE_SIZE),
       page: String(page),
     });
 
+    requests++;
+
     const response =
       await xs2eventGet<SupplierTicketsResponse>(
         `/tickets?${params.toString()}`
       );
 
-    if (!Array.isArray(response.tickets)) {
+    checkRunBudget(startedAt);
+
+    if (
+      !Array.isArray(response.tickets) ||
+      response.tickets.length > TICKET_PAGE_SIZE
+    ) {
       throw new Error(
-        'Unexpected XS2Event tickets response.'
+        'Unexpected XS2Event bulk tickets response.'
       );
     }
 
-    for (const ticket of response.tickets) {
+    const pagination = response.pagination;
+
+    if (
+      pagination?.page_number !== undefined &&
+      pagination.page_number !== page
+    ) {
+      throw new Error(
+        'Unexpected bulk ticket page number.'
+      );
+    }
+
+    if (pagination?.total_size !== undefined) {
+      const total = pagination.total_size;
+
       if (
-        ticket.ticket_id &&
-        SAFE_ID.test(ticket.ticket_id) &&
-        ticket.ticket_status === 'available' &&
-        Number.isInteger(ticket.stock) &&
-        (ticket.stock ?? 0) > 0 &&
-        (
-          !ticket.event_id ||
-          ticket.event_id === eventId
-        )
+        !Number.isSafeInteger(total) ||
+        total < 0
       ) {
-        uniqueTickets.set(
-          ticket.ticket_id,
-          ticket
+        throw new Error(
+          'Invalid bulk ticket pagination total.'
         );
       }
+
+      if (
+        expectedTotal !== null &&
+        expectedTotal !== total
+      ) {
+        throw new Error(
+          'Bulk ticket inventory changed during pagination.'
+        );
+      }
+
+      expectedTotal = total;
+    }
+
+    rawTickets += response.tickets.length;
+
+    for (const ticket of response.tickets) {
+      const eventId = ticket.event_id;
+      const ticketId = ticket.ticket_id;
+
+      if (
+        !eventId ||
+        !requestedEventIds.has(eventId)
+      ) {
+        throw new Error(
+          'Bulk response contains a missing or unexpected event ID.'
+        );
+      }
+
+      if (
+        !ticketId ||
+        !SAFE_ID.test(ticketId)
+      ) {
+        throw new Error(
+          'Bulk response contains an invalid ticket ID.'
+        );
+      }
+
+      if (
+        ticket.ticket_status !== 'available' ||
+        !Number.isSafeInteger(ticket.stock) ||
+        (ticket.stock ?? 0) <= 0
+      ) {
+        throw new Error(
+          'Bulk response contains unexpected ticket availability.'
+        );
+      }
+
+      if (seenTicketIds.has(ticketId)) {
+        throw new Error(
+          'Duplicate ticket detected during bulk pagination.'
+        );
+      }
+
+      seenTicketIds.set(ticketId, eventId);
+
+      ticketsByEvent.get(eventId)!.add(ticketId);
     }
 
     if (
-      response.tickets.length < TICKET_PAGE_SIZE
+      expectedTotal !== null &&
+      rawTickets > expectedTotal
     ) {
+      throw new Error(
+        'Bulk ticket count exceeds reported total.'
+      );
+    }
+
+    const hasNextPage =
+      typeof pagination?.next_page === 'string' &&
+      pagination.next_page.trim().length > 0;
+
+    if (
+      expectedTotal !== null &&
+      rawTickets === expectedTotal
+    ) {
+      if (hasNextPage) {
+        throw new Error(
+          'Inconsistent bulk ticket pagination.'
+        );
+      }
+
       complete = true;
       break;
+    }
+
+    if (
+      pagination?.next_page !== undefined &&
+      !hasNextPage
+    ) {
+      if (
+        expectedTotal !== null &&
+        rawTickets !== expectedTotal
+      ) {
+        throw new Error(
+          'Bulk ticket pagination ended prematurely.'
+        );
+      }
+
+      complete = true;
+      break;
+    }
+
+    if (
+      response.tickets.length < TICKET_PAGE_SIZE &&
+      !hasNextPage
+    ) {
+      if (
+        expectedTotal !== null &&
+        rawTickets !== expectedTotal
+      ) {
+        throw new Error(
+          'Incomplete bulk ticket inventory.'
+        );
+      }
+
+      complete = true;
+      break;
+    }
+
+    if (response.tickets.length === 0) {
+      throw new Error(
+        'Unexpected empty bulk ticket page.'
+      );
     }
   }
 
   if (!complete) {
     throw new Error(
-      `Ticket pagination limit reached for ${eventId}.`
+      'Bulk ticket pagination limit reached.'
     );
+  }
+
+  for (const eventId of uniqueEventIds) {
+    const count =
+      ticketsByEvent.get(eventId)?.size ?? 0;
+
+    availability.set(eventId, {
+      hasAvailableTickets: count > 0,
+      availableCategories: count,
+    });
   }
 
   return {
-    hasAvailableTickets: uniqueTickets.size > 0,
-    availableCategories: uniqueTickets.size,
+    availability,
+    requests,
+    tickets: seenTicketIds.size,
   };
 }
 
-async function processEvent(
+function buildEventRecord(
   event: SupplierEvent,
   sport: string,
-  startedAt: number
-): Promise<EventResult> {
-  if (
-    !isValidEvent(event, sport) ||
-    !event.event_id ||
-    !event.event_name
-  ) {
-    return {
-      record: null,
-      skipped: true,
-      availabilityFailed: false,
-      failedEventId: null,
-    };
-  }
-
-  let availability: Availability | null = null;
-  let availabilityFailed = false;
-
-  try {
-    availability =
-      await fetchTicketAvailability(
-        event.event_id,
-        startedAt
-      );
-  } catch (error) {
-    availabilityFailed = true;
-
-    console.error(
-      '[XS2Event sync] Availability check failed:',
-      event.event_id,
-      error instanceof Error
-        ? error.message
-        : 'Unknown error'
-    );
-  }
-
+  availability: Availability | null
+): EventRecord {
   const checkedAt = new Date().toISOString();
 
-  const record: EventRecord = {
+  return {
     source_environment: SOURCE_ENVIRONMENT,
-    supplier_event_id: event.event_id,
+    supplier_event_id: event.event_id!,
     sport_type: sport,
-    event_name: event.event_name,
+    event_name: event.event_name!,
     tournament_name:
       event.tournament_name ?? null,
     venue_name:
@@ -384,7 +543,7 @@ async function processEvent(
       event.event_status ?? null,
     event_checked_at: checkedAt,
     updated_at: checkedAt,
-    ...(availability
+    ...(availability !== null
       ? {
           has_available_tickets:
             availability.hasAvailableTickets,
@@ -394,15 +553,6 @@ async function processEvent(
             checkedAt,
         }
       : {}),
-  };
-
-  return {
-    record,
-    skipped: false,
-    availabilityFailed,
-    failedEventId: availabilityFailed
-      ? event.event_id
-      : null,
   };
 }
 
@@ -469,6 +619,11 @@ export async function GET(request: NextRequest) {
     let processedEvents = 0;
     let databaseWrites = 0;
 
+    let bulkGroupsAttempted = 0;
+    let bulkGroupsCompleted = 0;
+    let bulkTicketRequests = 0;
+    let bulkTicketsRetrieved = 0;
+
     const failedAvailabilityEventIds: string[] = [];
 
     const recordsWithAvailability =
@@ -495,7 +650,7 @@ export async function GET(request: NextRequest) {
       }
 
       const groupEnd = Math.min(
-        currentOffset + AVAILABILITY_CONCURRENCY,
+        currentOffset + BULK_GROUP_SIZE,
         batchEnd
       );
 
@@ -504,65 +659,104 @@ export async function GET(request: NextRequest) {
         groupEnd
       );
 
-      const results = await Promise.all(
-        group.map((event) =>
-          processEvent(
-            event,
-            sport,
-            startedAt
-          )
-        )
+      const validEvents = group.filter(
+        (event) => isValidEvent(event, sport)
       );
 
-      for (const result of results) {
-        processedEvents++;
+      processedEvents += group.length;
 
-        if (result.skipped) {
-          skippedEvents++;
-          continue;
-        }
+      skippedEvents +=
+        group.length - validEvents.length;
 
-        if (result.availabilityFailed) {
-          availabilityFailures++;
+      if (validEvents.length === 0) {
+        currentOffset = groupEnd;
+        continue;
+      }
 
-          if (result.failedEventId) {
-            failedAvailabilityEventIds.push(
-              result.failedEventId
-            );
-          }
-        }
+      const eventIds = validEvents.map(
+        (event) => event.event_id!
+      );
 
-        if (!result.record) {
-          continue;
-        }
+      bulkGroupsAttempted++;
 
-        const eventId =
-          result.record.supplier_event_id;
+      let result: BulkAvailabilityResult;
 
-        if (result.availabilityFailed) {
-          if (!recordsWithAvailability.has(eventId)) {
+      try {
+        result =
+          await fetchBulkTicketAvailability(
+            eventIds,
+            startedAt
+          );
+
+        bulkGroupsCompleted++;
+        bulkTicketRequests += result.requests;
+        bulkTicketsRetrieved += result.tickets;
+      } catch (error) {
+        availabilityFailures += validEvents.length;
+
+        failedAvailabilityEventIds.push(
+          ...Array.from(new Set(eventIds))
+        );
+
+        console.error(
+          '[XS2Event sync] Bulk availability failed:',
+          sport,
+          page,
+          currentOffset,
+          error instanceof Error
+            ? error.message
+            : 'Unknown error'
+        );
+
+        for (const event of validEvents) {
+          const eventId = event.event_id!;
+
+          if (
+            !recordsWithAvailability.has(eventId)
+          ) {
             recordsWithoutAvailability.set(
               eventId,
-              result.record
+              buildEventRecord(
+                event,
+                sport,
+                null
+              )
             );
           }
-        } else {
-          recordsWithoutAvailability.delete(eventId);
+        }
 
-          recordsWithAvailability.set(
-            eventId,
-            result.record
+        // Do not advance beyond a failed group.
+        // The controller will retry the original batch.
+        break;
+      }
+
+      for (const event of validEvents) {
+        const eventId = event.event_id!;
+
+        const availability =
+          result.availability.get(eventId);
+
+        if (!availability) {
+          throw new Error(
+            'Missing bulk availability result.'
           );
         }
 
-        savedEvents++;
+        recordsWithoutAvailability.delete(
+          eventId
+        );
+
+        recordsWithAvailability.set(
+          eventId,
+          buildEventRecord(
+            event,
+            sport,
+            availability
+          )
+        );
       }
 
       currentOffset = groupEnd;
-
-      if (availabilityFailures > 0) {
-        break;
-      }
     }
 
     checkRunBudget(startedAt);
@@ -587,6 +781,9 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      savedEvents +=
+        recordsWithAvailability.size;
+
       databaseWrites++;
     }
 
@@ -609,6 +806,9 @@ export async function GET(request: NextRequest) {
           `Supabase event metadata update failed: ${error.message}`
         );
       }
+
+      savedEvents +=
+        recordsWithoutAvailability.size;
 
       databaseWrites++;
     }
@@ -644,12 +844,16 @@ export async function GET(request: NextRequest) {
     return json({
       testMode: true,
       supplierEnvironment: SOURCE_ENVIRONMENT,
+      mode: 'bulk_inventory',
       sport,
       page,
       offset,
       batchSize: BATCH_SIZE,
-      availabilityConcurrency:
-        AVAILABILITY_CONCURRENCY,
+      bulkGroupSize: BULK_GROUP_SIZE,
+      bulkGroupsAttempted,
+      bulkGroupsCompleted,
+      bulkTicketRequests,
+      bulkTicketsRetrieved,
       databaseWrites,
       eventsOnSupplierPage:
         supplierEvents.length,
@@ -679,8 +883,12 @@ export async function GET(request: NextRequest) {
 
     return json(
       {
+        testMode: true,
+        supplierEnvironment: SOURCE_ENVIRONMENT,
         error:
           'XS2Event test synchronisation failed.',
+        supplierReservationsCreated: false,
+        supplierOrdersCreated: false,
       },
       503
     );
