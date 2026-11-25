@@ -1,4 +1,3 @@
-
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,6 +15,8 @@ const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const SCHEDULING_TOLERANCE_MS = 15 * 1000;
 const LOCK_DURATION_MS = 120 * 1000;
 const BATCH_TIMEOUT_MS = 40 * 1000;
+const NEXT_BATCH_START_LIMIT_MS = 10 * 1000;
+const MAX_BATCHES_PER_RUN = 5;
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
 
 const SPORTS = [
@@ -309,6 +310,8 @@ async function runBatch(
 }
 
 export async function GET(request: NextRequest) {
+  const invocationStartedAt = Date.now();
+
   if (process.env.VERCEL_ENV !== 'preview') {
     return json({ error: 'Not found.' }, 404);
   }
@@ -399,26 +402,26 @@ export async function GET(request: NextRequest) {
         ? randomUUID()
         : row.cycle_id;
 
-      const page = newCycle ? 1 : row.next_page;
-      const offset = newCycle ? 0 : row.next_offset;
+      let page = newCycle ? 1 : row.next_page;
+      let offset = newCycle ? 0 : row.next_offset;
 
-      const processed = newCycle
+      let processed = newCycle
         ? 0
         : row.events_processed;
 
-      const saved = newCycle
+      let saved = newCycle
         ? 0
         : row.events_saved;
 
-      const skipped = newCycle
+      let skipped = newCycle
         ? 0
         : row.events_skipped;
 
-      const failures = newCycle
+      let failures = newCycle
         ? 0
         : row.availability_failures;
 
-      const consecutiveFailures = newCycle
+      let consecutiveFailures = newCycle
         ? 0
         : row.consecutive_failures;
 
@@ -464,97 +467,154 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
+      let batchesCompleted = 0;
+      let runProcessed = 0;
+      let runSaved = 0;
+      let runSkipped = 0;
+
       try {
-        const batch = await runBatch(
-          request,
-          row.sport_type,
-          page,
-          offset
-        );
-
-        const finishedAt =
-          new Date().toISOString();
-
-        const { data: updated, error: updateError } =
-          await supabase
-            .from(TABLE)
-            .update({
-              status: batch.complete
-                ? 'completed'
-                : 'pending',
-
-              next_page: batch.nextCursor?.page ?? 1,
-              next_offset: batch.nextCursor?.offset ?? 0,
-
-              events_processed:
-                processed + batch.eventsProcessed,
-
-              events_saved:
-                saved + batch.eventsSaved,
-
-              events_skipped:
-                skipped + batch.eventsSkipped,
-
-              availability_failures:
-                failures + batch.availabilityFailures,
-
-              consecutive_failures: 0,
-
-              last_batch_at: finishedAt,
-
-              last_completed_at: batch.complete
-                ? finishedAt
-                : row.last_completed_at,
-
-              next_retry_at: null,
-              last_error: null,
-              lock_token: null,
-              locked_until: null,
-              updated_at: finishedAt,
-            })
-            .eq('source_environment', ENVIRONMENT)
-            .eq('sport_type', row.sport_type)
-            .eq('lock_token', lockToken)
-            .select('sport_type')
-            .maybeSingle();
-
-        if (updateError || !updated) {
-          throw new Error(
-            'Unable to save batch progress.'
+        while (true) {
+          const batch = await runBatch(
+            request,
+            row.sport_type,
+            page,
+            offset
           );
-        }
 
-        return json({
-          ok: true,
-          testMode: true,
-          supplierEnvironment: ENVIRONMENT,
-          mode: 'controller',
-          refreshIntervalMinutes: 5,
-          sport: row.sport_type,
-          cycleId,
-          status: batch.complete
-            ? 'completed'
-            : 'pending',
-          page,
-          offset,
-          batchEventsProcessed:
-            batch.eventsProcessed,
-          batchEventsSaved:
-            batch.eventsSaved,
-          batchEventsSkipped:
-            batch.eventsSkipped,
-          totalEventsProcessed:
-            processed + batch.eventsProcessed,
-          totalEventsSaved:
-            saved + batch.eventsSaved,
-          totalEventsSkipped:
-            skipped + batch.eventsSkipped,
-          nextCursor: batch.nextCursor,
-          complete: batch.complete,
-          supplierReservationsCreated: false,
-          supplierOrdersCreated: false,
-          completedAt: finishedAt,
-        });
+          const finishedAt =
+            new Date().toISOString();
+
+          const continueRun =
+            !batch.complete &&
+            batchesCompleted + 1 < MAX_BATCHES_PER_RUN &&
+            Date.now() - invocationStartedAt <
+              NEXT_BATCH_START_LIMIT_MS;
+
+          const { data: updated, error: updateError } =
+            await supabase
+              .from(TABLE)
+              .update({
+                status: batch.complete
+                  ? 'completed'
+                  : continueRun
+                    ? 'running'
+                    : 'pending',
+
+                next_page: batch.nextCursor?.page ?? 1,
+                next_offset: batch.nextCursor?.offset ?? 0,
+
+                events_processed:
+                  processed + batch.eventsProcessed,
+
+                events_saved:
+                  saved + batch.eventsSaved,
+
+                events_skipped:
+                  skipped + batch.eventsSkipped,
+
+                availability_failures:
+                  failures + batch.availabilityFailures,
+
+                consecutive_failures: 0,
+
+                last_batch_at: finishedAt,
+
+                last_completed_at: batch.complete
+                  ? finishedAt
+                  : row.last_completed_at,
+
+                next_retry_at: null,
+                last_error: null,
+
+                lock_token: continueRun
+                  ? lockToken
+                  : null,
+
+                locked_until: continueRun
+                  ? new Date(
+                      Date.now() + LOCK_DURATION_MS
+                    ).toISOString()
+                  : null,
+
+                updated_at: finishedAt,
+              })
+              .eq('source_environment', ENVIRONMENT)
+              .eq('sport_type', row.sport_type)
+              .eq('lock_token', lockToken)
+              .select('sport_type')
+              .maybeSingle();
+
+          if (updateError || !updated) {
+            throw new Error(
+              'Unable to save batch progress.'
+            );
+          }
+
+          batchesCompleted++;
+
+          runProcessed += batch.eventsProcessed;
+          runSaved += batch.eventsSaved;
+          runSkipped += batch.eventsSkipped;
+
+          processed += batch.eventsProcessed;
+          saved += batch.eventsSaved;
+          skipped += batch.eventsSkipped;
+          failures += batch.availabilityFailures;
+
+          consecutiveFailures = 0;
+
+          if (continueRun && batch.nextCursor) {
+            page = batch.nextCursor.page;
+            offset = batch.nextCursor.offset;
+
+            continue;
+          }
+
+          return json({
+            ok: true,
+            testMode: true,
+            supplierEnvironment: ENVIRONMENT,
+            mode: 'controller',
+            refreshIntervalMinutes: 5,
+
+            batchesCompleted,
+
+            runEventsProcessed: runProcessed,
+            runEventsSaved: runSaved,
+            runEventsSkipped: runSkipped,
+
+            sport: row.sport_type,
+            cycleId,
+
+            status: batch.complete
+              ? 'completed'
+              : 'pending',
+
+            page,
+            offset,
+
+            batchEventsProcessed:
+              batch.eventsProcessed,
+
+            batchEventsSaved:
+              batch.eventsSaved,
+
+            batchEventsSkipped:
+              batch.eventsSkipped,
+
+            totalEventsProcessed: processed,
+            totalEventsSaved: saved,
+            totalEventsSkipped: skipped,
+
+            nextCursor: batch.nextCursor,
+            complete: batch.complete,
+
+            supplierReservationsCreated: false,
+            supplierOrdersCreated: false,
+
+            completedAt: finishedAt,
+          });
+        }
       } catch (batchError) {
         const failureCount =
           consecutiveFailures + 1;
@@ -618,15 +678,22 @@ export async function GET(request: NextRequest) {
             supplierEnvironment: ENVIRONMENT,
             mode: 'controller',
             refreshIntervalMinutes: 5,
+
             sport: row.sport_type,
             status: 'failed',
+
             page,
             offset,
+
             consecutiveFailures: failureCount,
             nextRetryAt,
+
             failureStateSaved:
               !releaseError && Boolean(released),
-            cursorAdvanced: false,
+
+            batchesCompleted,
+            cursorAdvanced: batchesCompleted > 0,
+
             supplierReservationsCreated: false,
             supplierOrdersCreated: false,
           },
