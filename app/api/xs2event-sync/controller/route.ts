@@ -1,3 +1,4 @@
+
 import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -135,13 +136,20 @@ function isEligible(
   }
 
   if (row.status === 'completed') {
-    if (!row.last_completed_at) {
+    // Measure the refresh interval from the previous cycle's start,
+    // not its completion. Never restart an unfinished cycle.
+    const previousStart =
+      row.cycle_started_at ?? row.last_completed_at;
+
+    if (!previousStart) {
       return true;
     }
 
+    const previousStartMs = Date.parse(previousStart);
+
     return (
-      now - Date.parse(row.last_completed_at) >=
-      REFRESH_INTERVAL_MS
+      !Number.isFinite(previousStartMs) ||
+      now - previousStartMs >= REFRESH_INTERVAL_MS
     );
   }
 
