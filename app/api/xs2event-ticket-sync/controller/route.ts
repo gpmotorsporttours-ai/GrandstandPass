@@ -9,11 +9,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 
 const ENVIRONMENT = 'test';
-const DEFAULT_SPORT = 'soccer';
-const SPORTS = new Set<string>([
-  'soccer', 'formula1', 'motogp', 'tennis', 'basketball',
-  'nba', 'golf', 'horseracing', 'nfl', 'rugby',
-]);
+const DEFAULT_SPORT = 'all';
 const TABLE = 'xs2event_ticket_sync_progress';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -70,6 +66,7 @@ type TicketBatch = {
   recoveredEventRecords: number;
   differentSportTickets: number;
   ticketsSkipped: number;
+  unsupportedSportTickets: number;
   duplicateRecords: number;
   hasNextPage: boolean;
   nextCursor: {
@@ -198,6 +195,7 @@ function validateBatch(
     batch.recoveredEventRecords,
     batch.differentSportTickets,
     batch.ticketsSkipped,
+    batch.unsupportedSportTickets,
     batch.duplicateRecords,
   ];
 
@@ -209,12 +207,13 @@ function validateBatch(
 
   if (
     batch.ticketsReceived > 50 ||
-    batch.ticketsSkipped !== 0 ||
+    batch.ticketsSkipped !== batch.unsupportedSportTickets ||
     batch.ticketsModified + batch.ticketsNotModified !== batch.ticketsSaved ||
     batch.recoveredEventRecords > batch.ticketsReceived ||
-    batch.differentSportTickets > batch.ticketsReceived ||
-    batch.databaseModified !== (batch.ticketsModified > 0) ||
+    batch.differentSportTickets !== 0 ||
+    batch.databaseModified !== (batch.ticketsModified > 0 || batch.recoveredEventRecords > 0) ||
     batch.ticketsSaved +
+      batch.ticketsSkipped +
       batch.duplicateRecords !==
       batch.ticketsReceived
   ) {
@@ -364,12 +363,12 @@ export async function GET(
       'sport'
     ) ?? DEFAULT_SPORT;
 
-  if (!SPORTS.has(requestedSport)) {
+  if (requestedSport !== DEFAULT_SPORT) {
     return json(requestedSport, 
       {
         ok: false,
         error:
-          'Invalid or unsupported sport.',
+          'Only consolidated all-sport synchronisation is supported.',
       },
       400
     );
@@ -578,6 +577,7 @@ export async function GET(
     let runTicketsNotModified = 0;
     let runRecoveredEventRecords = 0;
     let runDifferentSportTickets = 0;
+    let runUnsupportedSportTickets = 0;
     let totalSupplierRecords:
       number | null = null;
 
@@ -727,6 +727,7 @@ export async function GET(
         runTicketsNotModified += batch.ticketsNotModified;
         runRecoveredEventRecords += batch.recoveredEventRecords;
         runDifferentSportTickets += batch.differentSportTickets;
+        runUnsupportedSportTickets += batch.unsupportedSportTickets;
 
         totalSupplierRecords =
           batch.totalSupplierRecords;
@@ -795,6 +796,7 @@ export async function GET(
         runTicketsNotModified,
         runRecoveredEventRecords,
         runDifferentSportTickets,
+        runUnsupportedSportTickets,
 
         totalPagesProcessed:
           pagesProcessed,
@@ -912,6 +914,7 @@ export async function GET(
           runTicketsNotModified,
           runRecoveredEventRecords,
           runDifferentSportTickets,
+        runUnsupportedSportTickets,
 
           totalPagesProcessed:
             pagesProcessed,
