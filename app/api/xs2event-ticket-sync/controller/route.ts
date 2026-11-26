@@ -6,7 +6,7 @@ import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 const ENVIRONMENT = 'test';
 const DEFAULT_SPORT = 'soccer';
@@ -18,8 +18,8 @@ const TABLE = 'xs2event_ticket_sync_progress';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const LOCK_DURATION_MS = 120 * 1000;
-const REQUEST_TIMEOUT_MS = 20 * 1000;
-const RUN_BUDGET_MS = 30 * 1000;
+const REQUEST_TIMEOUT_MS = 65 * 1000;
+const RUN_BUDGET_MS = 15 * 1000;
 const MAX_PAGES_PER_RUN = 5;
 const MAX_PAGE = 1000;
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000;
@@ -65,6 +65,10 @@ type TicketBatch = {
   totalSupplierRecords: number;
   ticketsReceived: number;
   ticketsSaved: number;
+  ticketsModified: number;
+  ticketsNotModified: number;
+  recoveredEventRecords: number;
+  differentSportTickets: number;
   ticketsSkipped: number;
   duplicateRecords: number;
   hasNextPage: boolean;
@@ -189,6 +193,10 @@ function validateBatch(
     batch.totalSupplierRecords,
     batch.ticketsReceived,
     batch.ticketsSaved,
+    batch.ticketsModified,
+    batch.ticketsNotModified,
+    batch.recoveredEventRecords,
+    batch.differentSportTickets,
     batch.ticketsSkipped,
     batch.duplicateRecords,
   ];
@@ -202,6 +210,10 @@ function validateBatch(
   if (
     batch.ticketsReceived > 50 ||
     batch.ticketsSkipped !== 0 ||
+    batch.ticketsModified + batch.ticketsNotModified !== batch.ticketsSaved ||
+    batch.recoveredEventRecords > batch.ticketsReceived ||
+    batch.differentSportTickets > batch.ticketsReceived ||
+    batch.databaseModified !== (batch.ticketsModified > 0) ||
     batch.ticketsSaved +
       batch.duplicateRecords !==
       batch.ticketsReceived
@@ -562,6 +574,10 @@ export async function GET(
     let runPagesProcessed = 0;
     let runTicketsReceived = 0;
     let runTicketsSaved = 0;
+    let runTicketsModified = 0;
+    let runTicketsNotModified = 0;
+    let runRecoveredEventRecords = 0;
+    let runDifferentSportTickets = 0;
     let totalSupplierRecords:
       number | null = null;
 
@@ -707,6 +723,10 @@ export async function GET(
 
         runTicketsSaved +=
           batch.ticketsSaved;
+        runTicketsModified += batch.ticketsModified;
+        runTicketsNotModified += batch.ticketsNotModified;
+        runRecoveredEventRecords += batch.recoveredEventRecords;
+        runDifferentSportTickets += batch.differentSportTickets;
 
         totalSupplierRecords =
           batch.totalSupplierRecords;
@@ -771,6 +791,10 @@ export async function GET(
         runTicketsReceived,
 
         runTicketsSaved,
+        runTicketsModified,
+        runTicketsNotModified,
+        runRecoveredEventRecords,
+        runDifferentSportTickets,
 
         totalPagesProcessed:
           pagesProcessed,
@@ -882,6 +906,12 @@ export async function GET(
           failedPage: page,
 
           runPagesProcessed,
+          runTicketsReceived,
+          runTicketsSaved,
+          runTicketsModified,
+          runTicketsNotModified,
+          runRecoveredEventRecords,
+          runDifferentSportTickets,
 
           totalPagesProcessed:
             pagesProcessed,
