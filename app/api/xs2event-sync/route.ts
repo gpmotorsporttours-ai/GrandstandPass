@@ -2,55 +2,43 @@ import 'server-only';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
-
-import { xs2eventGet } from '../../../lib/xs2event';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin';
+import { xs2eventGet } from '../../../lib/xs2event';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const SOURCE_ENVIRONMENT = 'test';
-
-const EVENT_PAGE_SIZE = 50;
-const TICKET_PAGE_SIZE = 50;
-const MAX_EVENT_PAGES = 1000;
-const MAX_BULK_TICKET_PAGES = 30;
-
-const BATCH_SIZE = 50;
-const BULK_GROUP_SIZE = 10;
-
-const RUN_BUDGET_MS = 30000;
-const GROUP_START_LIMIT_MS = 12000;
-
-const SAFE_ID = /^[A-Za-z0-9_-]{1,150}$/;
-const SAFE_SPORT = /^[a-z0-9_-]{1,50}$/;
-
-type SupplierEvent = {
-  event_id?: string;
-  event_name?: string;
-  sport_type?: string;
-  tournament_name?: string;
-  venue_name?: string;
-  city?: string;
-  iso_country?: string;
-  date_start?: string;
-  date_stop?: string;
-  event_status?: string;
-};
-
-type SupplierEventsResponse = {
-  events?: SupplierEvent[];
-};
+const ENVIRONMENT = 'test';
+const DEFAULT_SPORT = 'soccer';
+const SPORTS = new Set<string>([
+  'soccer', 'formula1', 'motogp', 'tennis',
+  'basketball', 'nba', 'golf', 'horseracing',
+  'nfl', 'rugby',
+]);
+const TABLE = 'xs2event_tickets';
+const PAGE_SIZE = 50;
+const MAX_PAGE = 1000;
 
 type SupplierTicket = {
-  event_id?: string;
   ticket_id?: string;
+  event_id?: string;
+  category_id?: string;
+  category_name?: string;
+  category_type?: string;
+  ticket_title?: string;
   ticket_status?: string;
-  stock?: number | null;
+  stock?: number;
+  net_rate?: number;
+  currency_code?: string;
+  min_order?: number;
+  pairs_only?: boolean;
+  created?: string;
+  updated?: string;
+  flags?: unknown;
 };
 
-type SupplierTicketsResponse = {
+type SupplierResponse = {
   tickets?: SupplierTicket[];
   pagination?: {
     total_size?: number;
@@ -60,37 +48,10 @@ type SupplierTicketsResponse = {
   };
 };
 
-type Availability = {
-  hasAvailableTickets: boolean;
-  availableCategories: number;
-};
-
-type BulkAvailabilityResult = {
-  availability: Map<string, Availability>;
-  requests: number;
-  tickets: number;
-};
-
-type EventRecord = {
-  source_environment: string;
-  supplier_event_id: string;
-  sport_type: string;
-  event_name: string;
-  tournament_name: string | null;
-  venue_name: string | null;
-  city: string | null;
-  iso_country: string | null;
-  date_start: string | null;
-  date_stop: string | null;
-  event_status: string | null;
-  event_checked_at: string;
-  updated_at: string;
-  has_available_tickets?: boolean;
-  available_categories?: number;
-  availability_checked_at?: string;
-};
-
-function json(data: unknown, status = 200) {
+function json(
+  data: Record<string, unknown>,
+  status = 200
+) {
   return NextResponse.json(data, {
     status,
     headers: {
@@ -99,516 +60,120 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function isAuthorised(request: NextRequest): boolean {
-  const configuredSecret = process.env.CRON_SECRET;
+function isAuthorised(
+  request: NextRequest
+): boolean {
+  const secret = process.env.CRON_SECRET;
 
-  if (!configuredSecret || configuredSecret.length < 32) {
-    return false;
-  }
-
-  const authorization =
-    request.headers.get('authorization') || '';
-
-  if (!authorization.startsWith('Bearer ')) {
+  if (!secret || secret.length < 32) {
     return false;
   }
 
   const expected = Buffer.from(
-    configuredSecret,
-    'utf8'
+    `Bearer ${secret}`
   );
 
-  const provided = Buffer.from(
-    authorization.slice(7),
-    'utf8'
+  const supplied = Buffer.from(
+    request.headers.get('authorization') ?? ''
   );
 
-  if (expected.length !== provided.length) {
-    return false;
-  }
-
-  return timingSafeEqual(expected, provided);
+  return (
+    expected.length === supplied.length &&
+    timingSafeEqual(expected, supplied)
+  );
 }
 
-function parseSupplierDate(
-  value?: string
+function validId(
+  value: unknown
+): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[A-Za-z0-9_-]{1,150}$/.test(value)
+  );
+}
+
+function optionalText(
+  value: unknown
 ): string | null {
-  if (!value) return null;
-
-  const timestamp = Date.parse(value);
-
-  if (!Number.isFinite(timestamp)) {
-    return null;
-  }
-
-  return new Date(timestamp).toISOString();
+  return typeof value === 'string'
+    ? value
+    : null;
 }
 
-function parseInteger(
-  value: string | null,
-  fallback: number,
-  minimum: number,
-  maximum: number
+function optionalInteger(
+  value: unknown,
+  maximum = Number.MAX_SAFE_INTEGER
 ): number | null {
-  if (value === null) {
-    return fallback;
-  }
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= maximum
+  )
+    ? value
+    : null;
+}
 
-  if (!/^\d+$/.test(value)) {
-    return null;
-  }
+function optionalBoolean(
+  value: unknown
+): boolean | null {
+  return typeof value === 'boolean'
+    ? value
+    : null;
+}
 
-  const parsed = Number(value);
-
+function optionalTimestamp(
+  value: unknown
+): string | null {
   if (
-    !Number.isSafeInteger(parsed) ||
-    parsed < minimum ||
-    parsed > maximum
+    typeof value !== 'string' ||
+    value.trim() === ''
   ) {
     return null;
   }
 
-  return parsed;
+  const trimmed = value.trim();
+
+  const hasTimezone =
+    /(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
+
+  const normalised = hasTimezone
+    ? trimmed
+    : `${trimmed.replace(' ', 'T')}Z`;
+
+  const parsed = Date.parse(normalised);
+
+  return Number.isFinite(parsed)
+    ? new Date(parsed).toISOString()
+    : null;
 }
 
-function isValidEvent(
-  event: SupplierEvent,
-  sport: string
+function validDate(
+  value: string
 ): boolean {
-  if (
-    !event.event_id ||
-    !SAFE_ID.test(event.event_id) ||
-    !event.event_name?.trim() ||
-    !parseSupplierDate(event.date_start)
-  ) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
   }
 
-  if (
-    event.sport_type &&
-    event.sport_type !== sport
-  ) {
-    return false;
-  }
-
-  if (event.event_status !== 'notstarted') {
-    return false;
-  }
-
-  if (
-    /\b(test|dummy|sample)\b/i.test(
-      event.event_name
-    )
-  ) {
-    return false;
-  }
-
-  if (sport === 'formula1') {
-    if (
-      /atp tour|motogp/i.test(event.event_name)
-    ) {
-      return false;
-    }
-
-    return /grand prix/i.test(event.event_name);
-  }
-
-  return true;
-}
-
-function checkRunBudget(startedAt: number) {
-  if (Date.now() - startedAt >= RUN_BUDGET_MS) {
-    throw new Error(
-      'Synchronisation time budget reached.'
-    );
-  }
-}
-
-async function fetchEventPage(
-  sport: string,
-  page: number
-): Promise<SupplierEvent[]> {
-  const today = new Date()
-    .toISOString()
-    .slice(0, 10);
-
-  const params = new URLSearchParams({
-    sport_type: sport,
-    date_stop: `ge:${today}`,
-    sorting: 'date_start:asc',
-    page_size: String(EVENT_PAGE_SIZE),
-    page: String(page),
-  });
-
-  const response =
-    await xs2eventGet<SupplierEventsResponse>(
-      `/events?${params.toString()}`
-    );
-
-  if (
-    !Array.isArray(response.events) ||
-    response.events.length > EVENT_PAGE_SIZE
-  ) {
-    throw new Error(
-      'Unexpected XS2Event events response.'
-    );
-  }
-
-  return response.events;
-}
-
-async function fetchBulkTicketAvailability(
-  eventIds: string[],
-  startedAt: number
-): Promise<BulkAvailabilityResult> {
-  const uniqueEventIds = Array.from(
-    new Set(eventIds)
+  const parsed = new Date(
+    `${value}T00:00:00Z`
   );
 
-  const availability =
-    new Map<string, Availability>();
-
-  if (uniqueEventIds.length === 0) {
-    return {
-      availability,
-      requests: 0,
-      tickets: 0,
-    };
-  }
-
-  if (
-    uniqueEventIds.length > BULK_GROUP_SIZE ||
-    uniqueEventIds.some(
-      (eventId) => !SAFE_ID.test(eventId)
-    )
-  ) {
-    throw new Error(
-      'Invalid bulk availability event IDs.'
-    );
-  }
-
-  const requestedEventIds =
-    new Set(uniqueEventIds);
-
-  const ticketsByEvent =
-    new Map<string, Set<string>>();
-
-  for (const eventId of uniqueEventIds) {
-    ticketsByEvent.set(
-      eventId,
-      new Set<string>()
-    );
-  }
-
-  let requests = 0;
-  let complete = false;
-  let rawTickets = 0;
-  let expectedTotal: number | null = null;
-
-  const seenTicketIds =
-    new Map<string, string>();
-
-  for (
-    let page = 1;
-    page <= MAX_BULK_TICKET_PAGES;
-    page++
-  ) {
-    checkRunBudget(startedAt);
-
-    const params = new URLSearchParams({
-      event_id:
-        uniqueEventIds.length === 1
-          ? uniqueEventIds[0]
-          : `in:[${uniqueEventIds.join(',')}]`,
-      ticket_status: 'available',
-      stock: 'gt:0',
-      page_size: String(TICKET_PAGE_SIZE),
-      page: String(page),
-    });
-
-    requests++;
-
-    const response =
-      await xs2eventGet<SupplierTicketsResponse>(
-        `/tickets?${params.toString()}`
-      );
-
-    checkRunBudget(startedAt);
-
-    if (
-      !Array.isArray(response.tickets) ||
-      response.tickets.length > TICKET_PAGE_SIZE
-    ) {
-      throw new Error(
-        'Unexpected XS2Event bulk tickets response.'
-      );
-    }
-
-    const pagination = response.pagination;
-
-    if (
-      pagination?.page_number !== undefined &&
-      pagination.page_number !== page
-    ) {
-      throw new Error(
-        'Unexpected bulk ticket page number.'
-      );
-    }
-
-    if (pagination?.total_size !== undefined) {
-      const total = pagination.total_size;
-
-      if (
-        !Number.isSafeInteger(total) ||
-        total < 0
-      ) {
-        throw new Error(
-          'Invalid bulk ticket pagination total.'
-        );
-      }
-
-      if (
-        expectedTotal !== null &&
-        expectedTotal !== total
-      ) {
-        throw new Error(
-          'Bulk ticket inventory changed during pagination.'
-        );
-      }
-
-      expectedTotal = total;
-    }
-
-    rawTickets += response.tickets.length;
-
-    for (const ticket of response.tickets) {
-      const eventId = ticket.event_id;
-      const ticketId = ticket.ticket_id;
-
-      if (
-        !eventId ||
-        !requestedEventIds.has(eventId)
-      ) {
-        throw new Error(
-          'Bulk response contains a missing or unexpected event ID.'
-        );
-      }
-
-      if (
-        !ticketId ||
-        !SAFE_ID.test(ticketId)
-      ) {
-        throw new Error(
-          'Bulk response contains an invalid ticket ID.'
-        );
-      }
-
-      if (seenTicketIds.has(ticketId)) {
-        throw new Error(
-          'Duplicate ticket detected during bulk pagination.'
-        );
-      }
-
-      seenTicketIds.set(ticketId, eventId);
-
-      // Count all returned records for pagination and duplicate validation,
-      // but never count explicitly non-available, zero-stock tickets as offers.
-      if (
-        typeof ticket.ticket_status === 'string' &&
-        ticket.ticket_status.trim().length > 0 &&
-        ticket.ticket_status !== 'available' &&
-        ticket.stock === 0
-      ) {
-        continue;
-      }
-
-      if (
-        ticket.ticket_status !== 'available' ||
-        !Number.isSafeInteger(ticket.stock) ||
-        (ticket.stock ?? 0) <= 0
-      ) {
-        throw new Error(
-          `Bulk response contains unexpected ticket availability: statusAvailable=${ticket.ticket_status === 'available'}, stockType=${typeof ticket.stock}, stockInteger=${Number.isSafeInteger(ticket.stock)}, stockPositive=${typeof ticket.stock === 'number' && ticket.stock > 0}.`
-        );
-      }
-
-      ticketsByEvent.get(eventId)!.add(ticketId);
-    }
-
-    if (
-      expectedTotal !== null &&
-      rawTickets > expectedTotal
-    ) {
-      throw new Error(
-        'Bulk ticket count exceeds reported total.'
-      );
-    }
-
-    const hasNextPage =
-      typeof pagination?.next_page === 'string' &&
-      pagination.next_page.trim().length > 0;
-
-    if (
-      expectedTotal !== null &&
-      rawTickets === expectedTotal
-    ) {
-      if (hasNextPage) {
-        throw new Error(
-          'Inconsistent bulk ticket pagination.'
-        );
-      }
-
-      complete = true;
-      break;
-    }
-
-    if (
-      pagination?.next_page !== undefined &&
-      !hasNextPage
-    ) {
-      if (
-        expectedTotal !== null &&
-        rawTickets !== expectedTotal
-      ) {
-        throw new Error(
-          'Bulk ticket pagination ended prematurely.'
-        );
-      }
-
-      complete = true;
-      break;
-    }
-
-    if (
-      response.tickets.length < TICKET_PAGE_SIZE &&
-      !hasNextPage
-    ) {
-      if (
-        expectedTotal !== null &&
-        rawTickets !== expectedTotal
-      ) {
-        throw new Error(
-          'Incomplete bulk ticket inventory.'
-        );
-      }
-
-      complete = true;
-      break;
-    }
-
-    if (response.tickets.length === 0) {
-      throw new Error(
-        'Unexpected empty bulk ticket page.'
-      );
-    }
-  }
-
-  if (!complete) {
-    throw new Error(
-      'Bulk ticket pagination limit reached.'
-    );
-  }
-
-  for (const eventId of uniqueEventIds) {
-    const count =
-      ticketsByEvent.get(eventId)?.size ?? 0;
-
-    availability.set(eventId, {
-      hasAvailableTickets: count > 0,
-      availableCategories: count,
-    });
-  }
-
-  return {
-    availability,
-    requests,
-    tickets: seenTicketIds.size,
-  };
+  return (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
 }
 
-// Split only invalid inventory responses, not network or rate-limit failures.
-// Keep the original batch retry contract if any individual event remains invalid.
-async function fetchAvailabilityWithFallback(
-  eventIds: string[],
-  startedAt: number
-): Promise<BulkAvailabilityResult> {
-  try {
-    return await fetchBulkTicketAvailability(eventIds, startedAt);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    if (
-      eventIds.length <= 1 ||
-      !message.startsWith('Bulk response contains unexpected ticket availability:') ||
-      Date.now() - startedAt >= GROUP_START_LIMIT_MS
-    ) {
-      throw error;
-    }
-    console.warn('[XS2Event sync] Splitting invalid availability group:',
-      eventIds.length, message);
-    const midpoint = Math.ceil(eventIds.length / 2);
-    const left = await fetchAvailabilityWithFallback(eventIds.slice(0, midpoint), startedAt);
-    if (Date.now() - startedAt >= GROUP_START_LIMIT_MS) {
-      throw new Error('Fallback time budget reached; batch will be retried.');
-    }
-    const right = await fetchAvailabilityWithFallback(eventIds.slice(midpoint), startedAt);
-    return {
-      availability: new Map([...left.availability, ...right.availability]),
-      requests: left.requests + right.requests,
-      tickets: left.tickets + right.tickets,
-    };
-  }
-}
-
-function buildEventRecord(
-  event: SupplierEvent,
-  sport: string,
-  availability: Availability | null
-): EventRecord {
-  const checkedAt = new Date().toISOString();
-
-  return {
-    source_environment: SOURCE_ENVIRONMENT,
-    supplier_event_id: event.event_id!,
-    sport_type: sport,
-    event_name: event.event_name!,
-    tournament_name:
-      event.tournament_name ?? null,
-    venue_name:
-      event.venue_name ?? null,
-    city:
-      event.city ?? null,
-    iso_country:
-      event.iso_country ?? null,
-    date_start:
-      parseSupplierDate(event.date_start),
-    date_stop:
-      parseSupplierDate(event.date_stop),
-    event_status:
-      event.event_status ?? null,
-    event_checked_at: checkedAt,
-    updated_at: checkedAt,
-    ...(availability !== null
-      ? {
-          has_available_tickets:
-            availability.hasAvailableTickets,
-          available_categories:
-            availability.availableCategories,
-          availability_checked_at:
-            checkedAt,
-        }
-      : {}),
-  };
-}
-
-export async function GET(request: NextRequest) {
-  const startedAt = Date.now();
-
+export async function GET(
+  request: NextRequest
+) {
   if (
     process.env.VERCEL_ENV !== 'preview' ||
     process.env.XS2EVENT_SYNC_ENABLED !== 'true'
   ) {
     return json(
-      { error: 'Synchronisation is not enabled.' },
+      { error: 'Not found.' },
       404
     );
   }
@@ -620,319 +185,522 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const searchParams =
-    request.nextUrl.searchParams;
+  const startedAt = Date.now();
 
-  const sport =
-    searchParams.get('sport') || 'formula1';
-
-  const page = parseInteger(
-    searchParams.get('page'),
-    1,
-    1,
-    MAX_EVENT_PAGES
+  const page = Number(
+    request.nextUrl.searchParams.get('page') ?? '1'
   );
 
-  const offset = parseInteger(
-    searchParams.get('offset'),
-    0,
-    0,
-    EVENT_PAGE_SIZE - 1
-  );
+  const mode =
+    request.nextUrl.searchParams.get('mode') ??
+    'full';
+
+  const requestedSport =
+    request.nextUrl.searchParams.get('sport') ??
+    DEFAULT_SPORT;
+
+  if (!SPORTS.has(requestedSport)) {
+    return json(
+      {
+        error:
+          'Invalid or unsupported sport.',
+      },
+      400
+    );
+  }
 
   if (
-    !SAFE_SPORT.test(sport) ||
-    page === null ||
-    offset === null
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    page > MAX_PAGE
   ) {
     return json(
-      { error: 'Invalid synchronisation parameters.' },
+      { error: 'Invalid page number.' },
+      400
+    );
+  }
+
+  if (
+    mode !== 'full' &&
+    mode !== 'incremental'
+  ) {
+    return json(
+      { error: 'Invalid synchronisation mode.' },
+      400
+    );
+  }
+
+  const requestedDate =
+    request.nextUrl.searchParams.get('since');
+
+  const todayUtc =
+    new Date().toISOString().slice(0, 10);
+
+  const sinceDate =
+    mode === 'incremental'
+      ? requestedDate ?? todayUtc
+      : null;
+
+  if (
+    sinceDate !== null &&
+    (
+      !validDate(sinceDate) ||
+      sinceDate > todayUtc
+    )
+  ) {
+    return json(
+      { error: 'Invalid supplier update date.' },
       400
     );
   }
 
   try {
-    const supplierEvents =
-      await fetchEventPage(sport, page);
+    const params = new URLSearchParams({
+      sport_type: requestedSport,
+      page_size: String(PAGE_SIZE),
+      page: String(page),
+      show_deleted: 'true',
+    });
 
-    const supabase = getSupabaseAdmin();
+    if (sinceDate !== null) {
+      params.set(
+        'updated',
+        `ge:${sinceDate}`
+      );
+    }
 
-    let savedEvents = 0;
-    let skippedEvents = 0;
-    let availabilityFailures = 0;
-    let processedEvents = 0;
-    let databaseWrites = 0;
+    const supplierResponse =
+      await xs2eventGet<SupplierResponse>(
+        `/tickets?${params.toString()}`,
+        { environment: 'test' }
+      );
 
-    let bulkGroupsAttempted = 0;
-    let bulkGroupsCompleted = 0;
-    let bulkTicketRequests = 0;
-    let bulkTicketsRetrieved = 0;
+    if (
+      !Array.isArray(
+        supplierResponse.tickets
+      )
+    ) {
+      throw new Error(
+        'Unexpected supplier ticket response.'
+      );
+    }
 
-    const failedAvailabilityEventIds: string[] = [];
+    const tickets =
+      supplierResponse.tickets;
 
-    const recordsWithAvailability =
-      new Map<string, EventRecord>();
+    if (tickets.length > PAGE_SIZE) {
+      throw new Error(
+        'Supplier returned more records than requested.'
+      );
+    }
 
-    const recordsWithoutAvailability =
-      new Map<string, EventRecord>();
+    const pagination =
+      supplierResponse.pagination;
 
-    let currentOffset = offset;
+    if (
+      !pagination ||
+      !Number.isSafeInteger(
+        pagination.total_size
+      ) ||
+      Number(pagination.total_size) < 0 ||
+      pagination.page_number !== page ||
+      pagination.page_size !== PAGE_SIZE ||
+      !(
+        typeof pagination.next_page === 'string' ||
+        pagination.next_page === null
+      )
+    ) {
+      throw new Error(
+        'Unexpected supplier pagination response.'
+      );
+    }
 
-    const batchEnd = Math.min(
-      supplierEvents.length,
-      offset + BATCH_SIZE
+    const hasNextPage = Boolean(
+      pagination.next_page
     );
 
-    while (currentOffset < batchEnd) {
-      checkRunBudget(startedAt);
+    if (
+      hasNextPage &&
+      page >= MAX_PAGE
+    ) {
+      throw new Error(
+        'Supplier pagination safety limit reached.'
+      );
+    }
 
-      if (
-        processedEvents > 0 &&
-        Date.now() - startedAt >= GROUP_START_LIMIT_MS
-      ) {
-        break;
+    // Fail closed before any inventory writes if the supplier response
+    // cannot be verified against the local test event catalogue.
+    const eventIds = new Set<string>();
+    for (const ticket of tickets) {
+      if (!validId(ticket.ticket_id) || !validId(ticket.event_id)) {
+        throw new Error('Supplier returned invalid ticket or event IDs.');
+      }
+      eventIds.add(ticket.event_id);
+    }
+
+    const eventSports = new Map<string, string>();
+    if (eventIds.size > 0) {
+      const { data: events, error: eventError } = await getSupabaseAdmin()
+        .from('xs2event_events')
+        .select('supplier_event_id,sport_type')
+        .eq('source_environment', ENVIRONMENT)
+        .in('supplier_event_id', Array.from(eventIds));
+
+      if (eventError || !events) {
+        throw new Error('Unable to verify supplier event classifications.');
       }
 
-      const groupEnd = Math.min(
-        currentOffset + BULK_GROUP_SIZE,
-        batchEnd
-      );
+      for (const event of events) {
+        if (!validId(event.supplier_event_id) ||
+            typeof event.sport_type !== 'string' ||
+            eventSports.has(event.supplier_event_id)) {
+          throw new Error('Invalid or ambiguous supplier event classification.');
+        }
+        eventSports.set(event.supplier_event_id, event.sport_type);
+      }
+    }
 
-      const group = supplierEvents.slice(
-        currentOffset,
-        groupEnd
-      );
+    // Recover missing catalogue entries using authoritative event metadata.
+    // Never infer a sport from the requested ticket filter.
+    const missingIds = [...eventIds].filter(id => !eventSports.has(id));
+    const recovered: Record<string, unknown>[] = [];
+    for (let i = 0; i < missingIds.length; i += 4) {
+      if (Date.now() - startedAt > 35000) {
+        throw new Error('Event recovery time budget reached. Retry batch.');
+      }
+      const group = missingIds.slice(i, i + 4);
+      const records = await Promise.all(group.map(async id => {
+        const event = await xs2eventGet<Record<string, unknown>>(
+          `/events/${id}`, { environment: 'test' }
+        );
+        const sport = event.sport_type;
+        const name = event.event_name;
+        const status = event.event_status;
+        if (event.event_id !== id || typeof sport !== 'string' ||
+            !/^[a-z0-9_-]{1,50}$/.test(sport) ||
+            typeof name !== 'string' || !name.trim() ||
+            typeof status !== 'string' || !status.trim()) {
+          throw new Error('Invalid recovered supplier event metadata.');
+        }
+        const dateStart = optionalTimestamp(event.date_start);
+        if (!dateStart) throw new Error('Invalid recovered event start date.');
+        const now = new Date().toISOString();
+        return {
+          source_environment: ENVIRONMENT,
+          supplier_event_id: id,
+          sport_type: sport,
+          event_name: name,
+          tournament_name: optionalText(event.tournament_name),
+          venue_name: optionalText(event.venue_name),
+          city: optionalText(event.city),
+          iso_country: optionalText(event.iso_country),
+          date_start: dateStart,
+          date_stop: optionalTimestamp(event.date_stop),
+          event_status: status,
+          event_checked_at: now,
+          updated_at: now,
+        };
+      }));
+      // Insert only: do not overwrite an event concurrently saved by event sync.
+      const { error } = await getSupabaseAdmin().from('xs2event_events')
+        .upsert(records, {
+          onConflict: 'source_environment,supplier_event_id',
+          ignoreDuplicates: true,
+          defaultToNull: false,
+        });
+      if (error) throw new Error('Unable to recover supplier event metadata.');
+      recovered.push(...records);
+    }
+    if (missingIds.length) {
+      const { data, error } = await getSupabaseAdmin().from('xs2event_events')
+        .select('supplier_event_id,sport_type')
+        .eq('source_environment', ENVIRONMENT)
+        .in('supplier_event_id', missingIds);
+      if (error || !data) throw new Error('Unable to verify recovered events.');
+      for (const event of data) {
+        const expected = recovered.find(row => row.supplier_event_id === event.supplier_event_id);
+        if (!expected || event.sport_type !== expected.sport_type) {
+          throw new Error('Conflicting recovered event classification.');
+        }
+        eventSports.set(event.supplier_event_id, event.sport_type);
+      }
+    }
+    for (const eventId of eventIds) {
+      if (!eventSports.has(eventId)) {
+        throw new Error('Unverified event. No ticket inventory written.');
+      }
+    }
+    const crossSportTickets = tickets.filter(ticket =>
+      eventSports.get(ticket.event_id!) !== requestedSport
+    ).length;
 
-      const validEvents = group.filter(
-        (event) => isValidEvent(event, sport)
-      );
+    const checkedAt =
+      new Date().toISOString();
 
-      processedEvents += group.length;
+    let ticketsSkipped = 0;
+    let duplicateRecords = 0;
 
-      skippedEvents +=
-        group.length - validEvents.length;
+    const rowsByTicketId = new Map<
+      string,
+      Record<string, unknown>
+    >();
 
-      if (validEvents.length === 0) {
-        currentOffset = groupEnd;
+    for (const ticket of tickets) {
+      if (
+        !validId(ticket.ticket_id) ||
+        !validId(ticket.event_id)
+      ) {
+        ticketsSkipped++;
         continue;
       }
 
-      const eventIds = validEvents.map(
-        (event) => event.event_id!
-      );
+      const row = {
+        source_environment: ENVIRONMENT,
 
-      bulkGroupsAttempted++;
+        supplier_ticket_id:
+          ticket.ticket_id,
 
-      let result: BulkAvailabilityResult;
+        supplier_event_id:
+          ticket.event_id,
 
-      try {
-        result =
-          await fetchAvailabilityWithFallback(
-            Array.from(new Set(eventIds)),
-            startedAt
-          );
+        sport_type: eventSports.get(ticket.event_id)!,
 
-        bulkGroupsCompleted++;
-        bulkTicketRequests += result.requests;
-        bulkTicketsRetrieved += result.tickets;
-      } catch (error) {
-        availabilityFailures += validEvents.length;
+        category_id:
+          optionalText(ticket.category_id),
 
-        failedAvailabilityEventIds.push(
-          ...Array.from(new Set(eventIds))
-        );
+        category_name:
+          optionalText(ticket.category_name),
 
-        console.error(
-          '[XS2Event sync] Bulk availability failed:',
-          sport,
-          page,
-          currentOffset,
-          error instanceof Error
-            ? error.message
-            : 'Unknown error'
-        );
+        category_type:
+          optionalText(ticket.category_type),
 
-        for (const event of validEvents) {
-          const eventId = event.event_id!;
+        ticket_title:
+          optionalText(ticket.ticket_title),
 
-          if (
-            !recordsWithAvailability.has(eventId)
-          ) {
-            recordsWithoutAvailability.set(
-              eventId,
-              buildEventRecord(
-                event,
-                sport,
-                null
-              )
-            );
-          }
-        }
+        ticket_status:
+          optionalText(ticket.ticket_status),
 
-        // Do not advance beyond a failed group.
-        // The controller will retry the original batch.
-        break;
-      }
-
-      for (const event of validEvents) {
-        const eventId = event.event_id!;
-
-        const availability =
-          result.availability.get(eventId);
-
-        if (!availability) {
-          throw new Error(
-            'Missing bulk availability result.'
-          );
-        }
-
-        recordsWithoutAvailability.delete(
-          eventId
-        );
-
-        recordsWithAvailability.set(
-          eventId,
-          buildEventRecord(
-            event,
-            sport,
-            availability
-          )
-        );
-      }
-
-      currentOffset = groupEnd;
-    }
-
-    checkRunBudget(startedAt);
-
-    if (recordsWithAvailability.size > 0) {
-      const { error } = await supabase
-        .from('xs2event_events')
-        .upsert(
-          Array.from(
-            recordsWithAvailability.values()
+        stock:
+          optionalInteger(
+            ticket.stock,
+            2147483647
           ),
-          {
-            onConflict:
-              'source_environment,supplier_event_id',
-            defaultToNull: false,
-          }
-        );
 
-      if (error) {
-        throw new Error(
-          `Supabase synchronisation failed: ${error.message}`
-        );
-      }
+        net_rate:
+          optionalInteger(ticket.net_rate),
 
-      savedEvents +=
-        recordsWithAvailability.size;
+        currency_code:
+          optionalText(ticket.currency_code),
 
-      databaseWrites++;
-    }
-
-    if (recordsWithoutAvailability.size > 0) {
-      const { error } = await supabase
-        .from('xs2event_events')
-        .upsert(
-          Array.from(
-            recordsWithoutAvailability.values()
+        min_order:
+          optionalInteger(
+            ticket.min_order,
+            2147483647
           ),
-          {
-            onConflict:
-              'source_environment,supplier_event_id',
-            defaultToNull: false,
-          }
-        );
 
-      if (error) {
-        throw new Error(
-          `Supabase event metadata update failed: ${error.message}`
-        );
-      }
+        pairs_only:
+          optionalBoolean(ticket.pairs_only),
 
-      savedEvents +=
-        recordsWithoutAvailability.size;
+        supplier_created_at:
+          optionalTimestamp(ticket.created),
 
-      databaseWrites++;
-    }
+        supplier_updated_at:
+          optionalTimestamp(ticket.updated),
 
-    let nextCursor: {
-      sport: string;
-      page: number;
-      offset: number;
-    } | null = null;
+        supplier_data: ticket,
 
-    let paginationLimitReached = false;
+        ticket_checked_at: checkedAt,
 
-    if (currentOffset < supplierEvents.length) {
-      nextCursor = {
-        sport,
-        page,
-        offset: currentOffset,
+        updated_at: checkedAt,
       };
-    } else if (
-      supplierEvents.length >= EVENT_PAGE_SIZE
-    ) {
-      if (page < MAX_EVENT_PAGES) {
-        nextCursor = {
-          sport,
-          page: page + 1,
-          offset: 0,
-        };
-      } else {
-        paginationLimitReached = true;
+
+      const previous =
+        rowsByTicketId.get(
+          ticket.ticket_id
+        );
+
+      if (previous) {
+        duplicateRecords++;
+
+        const previousTimestamp =
+          typeof previous.supplier_updated_at ===
+          'string'
+            ? Date.parse(
+                previous.supplier_updated_at
+              )
+            : 0;
+
+        const currentTimestamp =
+          row.supplier_updated_at
+            ? Date.parse(
+                row.supplier_updated_at
+              )
+            : 0;
+
+        if (
+          currentTimestamp <
+          previousTimestamp
+        ) {
+          continue;
+        }
       }
+
+      rowsByTicketId.set(
+        ticket.ticket_id,
+        row
+      );
     }
+
+    if (ticketsSkipped > 0) {
+      throw new Error(
+        'Supplier returned invalid ticket or event IDs.'
+      );
+    }
+
+    const rows = Array.from(
+      rowsByTicketId.values()
+    );
+
+    let ticketsModified = 0;
+
+    if (rows.length > 0) {
+      const supabase =
+        getSupabaseAdmin();
+
+      const { error, count } = await supabase
+        .from(TABLE)
+        .upsert(rows, {
+          onConflict:
+            'source_environment,supplier_ticket_id',
+          ignoreDuplicates: false,
+          count: 'exact',
+        });
+
+      if (error) {
+        console.error(
+          '[XS2Event ticket sync] Database error:',
+          error.code,
+          error.message
+        );
+
+        throw new Error(
+          'Unable to save supplier ticket inventory.'
+        );
+      }
+
+      if (count === null) {
+        throw new Error('Database did not return an affected row count.');
+      }
+      ticketsModified = count;
+    }
+
+    const statusCounts: Record<
+      string,
+      number
+    > = {};
+
+    for (const row of rows) {
+      const status =
+        typeof row.ticket_status === 'string'
+          ? row.ticket_status
+          : 'unknown';
+
+      statusCounts[status] =
+        (statusCounts[status] ?? 0) + 1;
+    }
+
+    const availableTickets =
+      rows.filter(
+        (row) =>
+          row.ticket_status === 'available' &&
+          typeof row.stock === 'number' &&
+          row.stock > 0 &&
+          typeof row.net_rate === 'number' &&
+          row.net_rate > 0 &&
+          typeof row.currency_code === 'string' &&
+          /^[A-Z]{3}$/.test(row.currency_code)
+      ).length;
 
     return json({
+      ok: true,
       testMode: true,
-      supplierEnvironment: SOURCE_ENVIRONMENT,
-      mode: 'bulk_inventory',
-      sport,
+      supplierEnvironment: ENVIRONMENT,
+      mode,
+      sport: requestedSport,
+      sinceDate,
       page,
-      offset,
-      batchSize: BATCH_SIZE,
-      bulkGroupSize: BULK_GROUP_SIZE,
-      bulkGroupsAttempted,
-      bulkGroupsCompleted,
-      bulkTicketRequests,
-      bulkTicketsRetrieved,
-      databaseWrites,
-      eventsOnSupplierPage:
-        supplierEvents.length,
-      eventsProcessed: processedEvents,
-      eventsSaved: savedEvents,
-      eventsSkipped: skippedEvents,
-      availabilityFailures,
-      failedAvailabilityEventIds,
-      nextCursor,
-      paginationLimitReached,
-      complete:
-        nextCursor === null &&
-        !paginationLimitReached &&
-        availabilityFailures === 0,
-      durationMs: Date.now() - startedAt,
-      completedAt: new Date().toISOString(),
+      pageSize: PAGE_SIZE,
+
+      totalSupplierRecords:
+        pagination.total_size,
+
+      recoveredEvents: recovered.length,
+      crossSportTickets,
+      ticketsReceived: tickets.length,
+      ticketsSaved: rows.length,
+      ticketsModified,
+      ticketsNotModified: rows.length - ticketsModified,
+      ticketsSkipped,
+      duplicateRecords,
+
+      availableTickets,
+      statusCounts,
+
+      hasNextPage,
+
+      nextCursor: hasNextPage
+        ? {
+            sport: requestedSport,
+            mode,
+            page: page + 1,
+            since: sinceDate,
+          }
+        : null,
+
+      complete: !hasNextPage,
+
+      databaseModified:
+        ticketsModified > 0,
+
+      customerOrdersModified: false,
       supplierReservationsCreated: false,
       supplierOrdersCreated: false,
+
+      durationMs:
+        Date.now() - startedAt,
+
+      checkedAt,
     });
   } catch (error) {
     console.error(
-      '[XS2Event sync] Failed:',
+      '[XS2Event ticket sync] Failed:',
       error instanceof Error
         ? error.message
-        : 'Unknown error'
+        : 'Unknown error.'
     );
 
     return json(
       {
+        ok: false,
         testMode: true,
-        supplierEnvironment: SOURCE_ENVIRONMENT,
+        supplierEnvironment: ENVIRONMENT,
+        mode,
+        sport: requestedSport,
+        page,
+        sinceDate,
+
         error:
-          'XS2Event test synchronisation failed.',
+          'Ticket synchronisation failed.',
+
+        complete: false,
+        cursorAdvanced: false,
+
+        customerOrdersModified: false,
         supplierReservationsCreated: false,
         supplierOrdersCreated: false,
+
+        durationMs:
+          Date.now() - startedAt,
       },
       503
     );
