@@ -328,6 +328,44 @@ export async function GET(
       );
     }
 
+    // Fail closed before any inventory writes if the supplier response
+    // cannot be verified against the local test event catalogue.
+    const eventIds = new Set<string>();
+    for (const ticket of tickets) {
+      if (!validId(ticket.ticket_id) || !validId(ticket.event_id)) {
+        throw new Error('Supplier returned invalid ticket or event IDs.');
+      }
+      eventIds.add(ticket.event_id);
+    }
+
+    const eventSports = new Map<string, string>();
+    if (eventIds.size > 0) {
+      const { data: events, error: eventError } = await getSupabaseAdmin()
+        .from('xs2event_events')
+        .select('supplier_event_id,sport_type')
+        .eq('source_environment', ENVIRONMENT)
+        .in('supplier_event_id', Array.from(eventIds));
+
+      if (eventError || !events) {
+        throw new Error('Unable to verify supplier event classifications.');
+      }
+
+      for (const event of events) {
+        if (!validId(event.supplier_event_id) ||
+            typeof event.sport_type !== 'string' ||
+            eventSports.has(event.supplier_event_id)) {
+          throw new Error('Invalid or ambiguous supplier event classification.');
+        }
+        eventSports.set(event.supplier_event_id, event.sport_type);
+      }
+    }
+
+    for (const eventId of eventIds) {
+      if (eventSports.get(eventId) !== requestedSport) {
+        throw new Error('Supplier ticket batch contains an unmatched or different-sport event. No inventory written.');
+      }
+    }
+
     const checkedAt =
       new Date().toISOString();
 
@@ -357,7 +395,7 @@ export async function GET(
         supplier_event_id:
           ticket.event_id,
 
-        sport_type: requestedSport,
+        sport_type: eventSports.get(ticket.event_id)!,
 
         category_id:
           optionalText(ticket.category_id),
