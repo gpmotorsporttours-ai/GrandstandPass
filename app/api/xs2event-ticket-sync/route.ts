@@ -10,7 +10,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const ENVIRONMENT = 'test';
-const SPORT = 'soccer';
+const DEFAULT_SPORT = 'soccer';
+const SPORTS = new Set<string>([
+  'soccer', 'formula1', 'motogp', 'tennis',
+  'basketball', 'nba', 'golf', 'horseracing',
+  'nfl', 'rugby',
+]);
 const TABLE = 'xs2event_tickets';
 const PAGE_SIZE = 50;
 const MAX_PAGE = 1000;
@@ -192,13 +197,13 @@ export async function GET(
 
   const requestedSport =
     request.nextUrl.searchParams.get('sport') ??
-    SPORT;
+    DEFAULT_SPORT;
 
-  if (requestedSport !== SPORT) {
+  if (!SPORTS.has(requestedSport)) {
     return json(
       {
         error:
-          'Only Football synchronisation is enabled.',
+          'Invalid or unsupported sport.',
       },
       400
     );
@@ -251,7 +256,7 @@ export async function GET(
 
   try {
     const params = new URLSearchParams({
-      sport_type: SPORT,
+      sport_type: requestedSport,
       page_size: String(PAGE_SIZE),
       page: String(page),
       show_deleted: 'true',
@@ -352,7 +357,7 @@ export async function GET(
         supplier_event_id:
           ticket.event_id,
 
-        sport_type: SPORT,
+        sport_type: requestedSport,
 
         category_id:
           optionalText(ticket.category_id),
@@ -450,16 +455,19 @@ export async function GET(
       rowsByTicketId.values()
     );
 
+    let ticketsModified = 0;
+
     if (rows.length > 0) {
       const supabase =
         getSupabaseAdmin();
 
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from(TABLE)
         .upsert(rows, {
           onConflict:
             'source_environment,supplier_ticket_id',
           ignoreDuplicates: false,
+          count: 'exact',
         });
 
       if (error) {
@@ -473,6 +481,11 @@ export async function GET(
           'Unable to save supplier ticket inventory.'
         );
       }
+
+      if (count === null) {
+        throw new Error('Database did not return an affected row count.');
+      }
+      ticketsModified = count;
     }
 
     const statusCounts: Record<
@@ -507,7 +520,7 @@ export async function GET(
       testMode: true,
       supplierEnvironment: ENVIRONMENT,
       mode,
-      sport: SPORT,
+      sport: requestedSport,
       sinceDate,
       page,
       pageSize: PAGE_SIZE,
@@ -517,6 +530,8 @@ export async function GET(
 
       ticketsReceived: tickets.length,
       ticketsSaved: rows.length,
+      ticketsModified,
+      ticketsNotModified: rows.length - ticketsModified,
       ticketsSkipped,
       duplicateRecords,
 
@@ -527,7 +542,7 @@ export async function GET(
 
       nextCursor: hasNextPage
         ? {
-            sport: SPORT,
+            sport: requestedSport,
             mode,
             page: page + 1,
             since: sinceDate,
@@ -537,7 +552,7 @@ export async function GET(
       complete: !hasNextPage,
 
       databaseModified:
-        rows.length > 0,
+        ticketsModified > 0,
 
       customerOrdersModified: false,
       supplierReservationsCreated: false,
@@ -562,12 +577,12 @@ export async function GET(
         testMode: true,
         supplierEnvironment: ENVIRONMENT,
         mode,
-        sport: SPORT,
+        sport: requestedSport,
         page,
         sinceDate,
 
         error:
-          'Football ticket synchronisation failed.',
+          'Ticket synchronisation failed.',
 
         complete: false,
         cursorAdvanced: false,
