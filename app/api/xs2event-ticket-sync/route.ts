@@ -199,7 +199,7 @@ export async function GET(
     request.nextUrl.searchParams.get('sport') ??
     DEFAULT_SPORT;
 
-  if (!SPORTS.has(requestedSport)) {
+  if (requestedSport !== 'all' && !SPORTS.has(requestedSport)) {
     return json(
       {
         error:
@@ -256,11 +256,15 @@ export async function GET(
 
   try {
     const params = new URLSearchParams({
-      sport_type: requestedSport,
       page_size: String(PAGE_SIZE),
       page: String(page),
       show_deleted: 'true',
     });
+
+    // Preserve legacy requests during the controller transition.
+    if (requestedSport !== 'all') {
+      params.set('sport_type', requestedSport);
+    }
 
     if (sinceDate !== null) {
       params.set(
@@ -356,7 +360,7 @@ export async function GET(
 
       for (const event of events) {
         if (!validId(event.supplier_event_id) ||
-            !SPORTS.has(event.sport_type) ||
+            typeof event.sport_type !== 'string' || !event.sport_type.trim() ||
             eventSports.has(event.supplier_event_id)) {
           throw new Error('Invalid or ambiguous supplier event classification.');
         }
@@ -375,7 +379,7 @@ export async function GET(
           `/events/${id}`, { environment: 'test' }
         );
         if (!event || event.event_id !== id ||
-            typeof event.sport_type !== 'string' || !SPORTS.has(event.sport_type) ||
+            typeof event.sport_type !== 'string' || !event.sport_type.trim() ||
             typeof event.event_name !== 'string' || !event.event_name.trim() ||
             typeof event.event_status !== 'string' || !event.event_status.trim()) {
           throw new Error('Supplier event lookup returned invalid or unsupported event details.');
@@ -385,6 +389,7 @@ export async function GET(
       for (const { id, sport, status, event } of resolved) {
         eventSports.set(id, sport);
         eventStatuses.set(id, status);
+        if (!SPORTS.has(sport)) continue;
         missingEvents.push({
           source_environment: ENVIRONMENT,
           supplier_event_id: id,
@@ -420,8 +425,8 @@ export async function GET(
         .from('xs2event_events')
         .select('supplier_event_id,sport_type,event_status')
         .eq('source_environment', ENVIRONMENT)
-        .in('supplier_event_id', missingIds);
-      if (confirmError || !confirmed || confirmed.length !== missingIds.length) {
+        .in('supplier_event_id', missingEvents.map(event => event.supplier_event_id));
+      if (confirmError || !confirmed || confirmed.length !== missingEvents.length) {
         throw new Error('Unable to confirm recovered events. No inventory written.');
       }
       for (const event of confirmed) {
@@ -435,6 +440,24 @@ export async function GET(
     const checkedAt =
       new Date().toISOString();
 
+    // Unsupported sports are excluded, never relabelled as supported sports.
+    const unsupportedTickets = tickets.filter(ticket =>
+      !SPORTS.has(eventSports.get(ticket.event_id!) ?? '')
+    );
+    if (unsupportedTickets.length > 0) {
+      if (requestedSport !== 'all') {
+        throw new Error('Unsupported sport in legacy synchronisation request.');
+      }
+      // A historical misclassified row requires explicit reconciliation.
+      // Do not silently leave it sellable or advance the cursor.
+      const { data: existing, error } = await supabase.from(TABLE)
+        .select('supplier_ticket_id')
+        .eq('source_environment', ENVIRONMENT)
+        .in('supplier_ticket_id', unsupportedTickets.map(ticket => ticket.ticket_id!));
+      if (error || !existing || existing.length > 0) {
+        throw new Error('Unsupported sport inventory requires reconciliation.');
+      }
+    }
     let ticketsSkipped = 0;
     let duplicateRecords = 0;
 
@@ -451,6 +474,8 @@ export async function GET(
         ticketsSkipped++;
         continue;
       }
+
+      if (!SPORTS.has(eventSports.get(ticket.event_id) ?? '')) continue;
 
       const row = {
         source_environment: ENVIRONMENT,
@@ -635,11 +660,12 @@ export async function GET(
 
       ticketsReceived: tickets.length,
       recoveredEventRecords: missingEvents.length,
-      differentSportTickets: tickets.filter(ticket => eventSports.get(ticket.event_id!) !== requestedSport).length,
+      differentSportTickets: requestedSport === 'all' ? 0 : tickets.filter(ticket => eventSports.get(ticket.event_id!) !== requestedSport).length,
+      unsupportedSportTickets: unsupportedTickets.length,
       ticketsSaved: rows.length,
       ticketsModified,
       ticketsNotModified: rows.length - ticketsModified,
-      ticketsSkipped,
+      ticketsSkipped: ticketsSkipped + unsupportedTickets.length,
       duplicateRecords,
 
       availableTickets,
@@ -659,7 +685,7 @@ export async function GET(
       complete: !hasNextPage,
 
       databaseModified:
-        ticketsModified > 0,
+        ticketsModified > 0 || missingEvents.length > 0,
 
       customerOrdersModified: false,
       supplierReservationsCreated: false,
