@@ -328,21 +328,25 @@ export async function GET(
       );
     }
 
-    // Fail closed before any inventory writes if the supplier response
-    // cannot be verified against the local test event catalogue.
+    // The supplier ticket sport filter is not authoritative.
+    // Resolve each event against the test catalogue or supplier event API.
     const eventIds = new Set<string>();
     for (const ticket of tickets) {
-      if (!validId(ticket.ticket_id) || !validId(ticket.event_id)) {
+      if (!ticket || !validId(ticket.ticket_id) || !validId(ticket.event_id)) {
         throw new Error('Supplier returned invalid ticket or event IDs.');
       }
       eventIds.add(ticket.event_id);
     }
 
+    const supabase = getSupabaseAdmin();
     const eventSports = new Map<string, string>();
+    const eventStatuses = new Map<string, string | null>();
+    const missingEvents: Record<string, unknown>[] = [];
+
     if (eventIds.size > 0) {
-      const { data: events, error: eventError } = await getSupabaseAdmin()
+      const { data: events, error: eventError } = await supabase
         .from('xs2event_events')
-        .select('supplier_event_id,sport_type')
+        .select('supplier_event_id,sport_type,event_status')
         .eq('source_environment', ENVIRONMENT)
         .in('supplier_event_id', Array.from(eventIds));
 
@@ -352,17 +356,79 @@ export async function GET(
 
       for (const event of events) {
         if (!validId(event.supplier_event_id) ||
-            typeof event.sport_type !== 'string' ||
+            !SPORTS.has(event.sport_type) ||
             eventSports.has(event.supplier_event_id)) {
           throw new Error('Invalid or ambiguous supplier event classification.');
         }
         eventSports.set(event.supplier_event_id, event.sport_type);
+        eventStatuses.set(event.supplier_event_id, optionalText(event.event_status));
       }
     }
 
-    for (const eventId of eventIds) {
-      if (eventSports.get(eventId) !== requestedSport) {
-        throw new Error('Supplier ticket batch contains an unmatched or different-sport event. No inventory written.');
+    const missingIds = Array.from(eventIds).filter(id => !eventSports.has(id));
+    for (let i = 0; i < missingIds.length; i += 5) {
+      if (Date.now() - startedAt > 35000) {
+        throw new Error('Event lookup time budget exceeded. No inventory written.');
+      }
+      const resolved = await Promise.all(missingIds.slice(i, i + 5).map(async id => {
+        const event = await xs2eventGet<Record<string, unknown>>(
+          `/events/${id}`, { environment: 'test' }
+        );
+        if (!event || event.event_id !== id ||
+            typeof event.sport_type !== 'string' || !SPORTS.has(event.sport_type) ||
+            typeof event.event_name !== 'string' || !event.event_name.trim() ||
+            typeof event.event_status !== 'string' || !event.event_status.trim()) {
+          throw new Error('Supplier event lookup returned invalid or unsupported event details.');
+        }
+        return { id, sport: event.sport_type, status: event.event_status, event };
+      }));
+      for (const { id, sport, status, event } of resolved) {
+        eventSports.set(id, sport);
+        eventStatuses.set(id, status);
+        missingEvents.push({
+          source_environment: ENVIRONMENT,
+          supplier_event_id: id,
+          sport_type: sport,
+          event_name: event.event_name,
+          tournament_name: optionalText(event.tournament_name),
+          venue_name: optionalText(event.venue_name),
+          city: optionalText(event.city),
+          iso_country: optionalText(event.iso_country),
+          date_start: optionalTimestamp(event.date_start),
+          date_stop: optionalTimestamp(event.date_stop),
+          event_status: status,
+          has_available_tickets: null,
+          available_categories: null,
+          availability_checked_at: null,
+          event_checked_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Insert only missing catalogue entries; never overwrite existing event data.
+    if (missingEvents.length > 0) {
+      const { error } = await supabase.from('xs2event_events').upsert(missingEvents, {
+        onConflict: 'source_environment,supplier_event_id',
+        ignoreDuplicates: true,
+      });
+      if (error) {
+        console.error('[XS2Event ticket sync] Event insert error:', error.code, error.message);
+        throw new Error('Unable to save verified supplier events. No inventory written.');
+      }
+      const { data: confirmed, error: confirmError } = await supabase
+        .from('xs2event_events')
+        .select('supplier_event_id,sport_type,event_status')
+        .eq('source_environment', ENVIRONMENT)
+        .in('supplier_event_id', missingIds);
+      if (confirmError || !confirmed || confirmed.length !== missingIds.length) {
+        throw new Error('Unable to confirm recovered events. No inventory written.');
+      }
+      for (const event of confirmed) {
+        if (eventSports.get(event.supplier_event_id) !== event.sport_type) {
+          throw new Error('Conflicting recovered event classification. No inventory written.');
+        }
+        eventStatuses.set(event.supplier_event_id, optionalText(event.event_status));
       }
     }
 
@@ -544,6 +610,7 @@ export async function GET(
     const availableTickets =
       rows.filter(
         (row) =>
+          eventStatuses.get(row.supplier_event_id as string) === 'notstarted' &&
           row.ticket_status === 'available' &&
           typeof row.stock === 'number' &&
           row.stock > 0 &&
@@ -567,6 +634,8 @@ export async function GET(
         pagination.total_size,
 
       ticketsReceived: tickets.length,
+      recoveredEventRecords: missingEvents.length,
+      differentSportTickets: tickets.filter(ticket => eventSports.get(ticket.event_id!) !== requestedSport).length,
       ticketsSaved: rows.length,
       ticketsModified,
       ticketsNotModified: rows.length - ticketsModified,
