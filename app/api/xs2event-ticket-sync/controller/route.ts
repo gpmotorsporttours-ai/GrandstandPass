@@ -9,7 +9,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const ENVIRONMENT = 'test';
-const SPORT = 'soccer';
+const DEFAULT_SPORT = 'soccer';
+const SPORTS = new Set<string>([
+  'soccer', 'formula1', 'motogp', 'tennis', 'basketball',
+  'nba', 'golf', 'horseracing', 'nfl', 'rugby',
+]);
 const TABLE = 'xs2event_ticket_sync_progress';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -78,6 +82,7 @@ type TicketBatch = {
 };
 
 function json(
+  sport: string,
   data: Record<string, unknown>,
   status = 200
 ) {
@@ -86,7 +91,7 @@ function json(
       ...data,
       testMode: true,
       supplierEnvironment: ENVIRONMENT,
-      sport: SPORT,
+      sport,
       refreshIntervalMinutes: 5,
       customerOrdersModified: false,
       supplierReservationsCreated: false,
@@ -157,6 +162,7 @@ function incrementalSinceDate(
 
 function validateBatch(
   batch: TicketBatch,
+  sport: string,
   mode: SyncMode,
   page: number,
   sinceDate: string | null
@@ -165,7 +171,7 @@ function validateBatch(
     batch.ok !== true ||
     batch.testMode !== true ||
     batch.supplierEnvironment !== ENVIRONMENT ||
-    batch.sport !== SPORT ||
+    batch.sport !== sport ||
     batch.mode !== mode ||
     batch.page !== page ||
     batch.pageSize !== 50 ||
@@ -222,7 +228,7 @@ function validateBatch(
     batch.complete !== false ||
     batch.hasNextPage !== true ||
     !batch.nextCursor ||
-    batch.nextCursor.sport !== SPORT ||
+    batch.nextCursor.sport !== sport ||
     batch.nextCursor.mode !== mode ||
     batch.nextCursor.since !== sinceDate ||
     batch.nextCursor.page !== page + 1 ||
@@ -236,6 +242,7 @@ function validateBatch(
 
 async function runBatch(
   request: NextRequest,
+  sport: string,
   mode: SyncMode,
   page: number,
   sinceDate: string | null
@@ -259,7 +266,7 @@ async function runBatch(
     `https://${deploymentHost}`
   );
 
-  url.searchParams.set('sport', SPORT);
+  url.searchParams.set('sport', sport);
   url.searchParams.set('mode', mode);
   url.searchParams.set('page', String(page));
 
@@ -311,6 +318,7 @@ async function runBatch(
 
   validateBatch(
     batch,
+    sport,
     mode,
     page,
     sinceDate
@@ -342,14 +350,14 @@ export async function GET(
   const requestedSport =
     request.nextUrl.searchParams.get(
       'sport'
-    ) ?? SPORT;
+    ) ?? DEFAULT_SPORT;
 
-  if (requestedSport !== SPORT) {
-    return json(
+  if (!SPORTS.has(requestedSport)) {
+    return json(requestedSport, 
       {
         ok: false,
         error:
-          'Only Football ticket synchronisation is enabled.',
+          'Invalid or unsupported sport.',
       },
       400
     );
@@ -367,7 +375,7 @@ export async function GET(
         'source_environment',
         ENVIRONMENT
       )
-      .eq('sport_type', SPORT)
+      .eq('sport_type', requestedSport)
       .single();
 
     if (error || !data) {
@@ -383,7 +391,7 @@ export async function GET(
       row.locked_until &&
       Date.parse(row.locked_until) > now
     ) {
-      return json({
+      return json(requestedSport, {
         ok: true,
         status: 'busy',
         message:
@@ -396,7 +404,7 @@ export async function GET(
       row.next_retry_at &&
       Date.parse(row.next_retry_at) > now
     ) {
-      return json({
+      return json(requestedSport, {
         ok: true,
         status: 'waiting_for_retry',
         nextRetryAt: row.next_retry_at,
@@ -411,7 +419,7 @@ export async function GET(
         row.last_completed_at
       ) < REFRESH_INTERVAL_MS
     ) {
-      return json({
+      return json(requestedSport, {
         ok: true,
         status: 'idle',
         message:
@@ -528,7 +536,7 @@ export async function GET(
         'source_environment',
         ENVIRONMENT
       )
-      .eq('sport_type', SPORT)
+      .eq('sport_type', requestedSport)
       .eq('updated_at', row.updated_at)
       .or(
         `locked_until.is.null,locked_until.lte.${startedAt}`
@@ -543,7 +551,7 @@ export async function GET(
     }
 
     if (!claimed) {
-      return json({
+      return json(requestedSport, {
         ok: true,
         status: 'busy',
         message:
@@ -568,6 +576,7 @@ export async function GET(
       ) {
         const batch = await runBatch(
           request,
+          requestedSport,
           mode,
           page,
           sinceDate
@@ -663,7 +672,7 @@ export async function GET(
             'source_environment',
             ENVIRONMENT
           )
-          .eq('sport_type', SPORT)
+          .eq('sport_type', requestedSport)
           .eq('lock_token', lockToken)
           .select('sport_type')
           .maybeSingle();
@@ -728,7 +737,7 @@ export async function GET(
             'source_environment',
             ENVIRONMENT
           )
-          .eq('sport_type', SPORT)
+          .eq('sport_type', requestedSport)
           .eq('lock_token', lockToken)
           .select('sport_type')
           .maybeSingle();
@@ -740,7 +749,7 @@ export async function GET(
         }
       }
 
-      return json({
+      return json(requestedSport, {
         ok: true,
 
         mode: 'ticket_sync_controller',
@@ -848,7 +857,7 @@ export async function GET(
           'source_environment',
           ENVIRONMENT
         )
-        .eq('sport_type', SPORT)
+        .eq('sport_type', requestedSport)
         .eq('lock_token', lockToken)
         .select('sport_type')
         .maybeSingle();
@@ -858,7 +867,7 @@ export async function GET(
         message
       );
 
-      return json(
+      return json(requestedSport, 
         {
           ok: false,
 
@@ -905,7 +914,7 @@ export async function GET(
         : 'Unknown controller error.'
     );
 
-    return json(
+    return json(requestedSport, 
       {
         ok: false,
         status: 'failed',
