@@ -11,6 +11,7 @@ export const maxDuration = 60;
 
 const ENVIRONMENT = 'test';
 const TABLE = 'xs2event_tickets';
+const PROGRESS_TABLE = 'xs2event_ticket_sync_progress';
 const MAX_TICKETS = 10;
 const RUN_BUDGET_MS = 35000;
 
@@ -125,12 +126,18 @@ export async function GET(request: NextRequest) {
 
   const startedAt = Date.now();
 
-  // Explicitly require apply=true before writing.
   const apply =
     request.nextUrl.searchParams.get('apply') === 'true';
 
-  // Initial manual reconciliation uses the verified
-  // starting timestamp of the completed full cycle.
+  const automatic =
+    request.nextUrl.searchParams.get('automatic') === 'true';
+
+  const cycleId =
+    request.nextUrl.searchParams.get('cycleId');
+
+  const lockToken =
+    request.headers.get('x-sync-lock-token');
+
   const cutoff = normaliseTimestamp(
     request.nextUrl.searchParams.get('cutoff')
   );
@@ -145,30 +152,123 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  if (
+    automatic &&
+    (!apply || !validId(cycleId) || !validId(lockToken))
+  ) {
+    return json(
+      {
+        ok: false,
+        error: 'Automatic reconciliation requires an active cycle lock.',
+      },
+      400
+    );
+  }
+
   try {
     const supabase = getSupabaseAdmin();
 
     const { data: progress, error: progressError } =
       await supabase
-        .from('xs2event_ticket_sync_progress')
-        .select('last_full_completed_at')
+        .from(PROGRESS_TABLE)
+        .select(`
+          sync_mode,
+          sync_stage,
+          status,
+          cycle_id,
+          cycle_started_at,
+          last_full_completed_at,
+          lock_token,
+          locked_until
+        `)
         .eq('source_environment', ENVIRONMENT)
         .eq('sport_type', 'all')
         .single();
 
-    if (
-      progressError ||
-      !progress?.last_full_completed_at ||
-      Date.parse(progress.last_full_completed_at) <=
-        Date.parse(cutoff)
-    ) {
+    if (progressError || !progress) {
       return json(
         {
           ok: false,
-          error: 'Completed full synchronisation required.',
+          error: 'Unable to verify synchronisation progress.',
         },
-        409
+        503
       );
+    }
+
+    if (automatic) {
+      const cycleStartedAt = normaliseTimestamp(
+        progress.cycle_started_at
+      );
+
+      const lockedUntil = normaliseTimestamp(
+        progress.locked_until
+      );
+
+      if (
+        progress.sync_mode !== 'full' ||
+        progress.sync_stage !== 'reconciling' ||
+        progress.status !== 'running' ||
+        progress.cycle_id !== cycleId ||
+        progress.lock_token !== lockToken ||
+        cycleStartedAt !== cutoff ||
+        !lockedUntil ||
+        Date.parse(lockedUntil) <= Date.now()
+      ) {
+        return json(
+          {
+            ok: false,
+            error: 'No matching active reconciliation cycle.',
+          },
+          409
+        );
+      }
+    } else {
+      if (
+        progress.sync_stage === 'reconciling' ||
+        (
+          progress.sync_mode === 'full' &&
+          progress.status !== 'completed'
+        ) ||
+        !progress.last_full_completed_at ||
+        Date.parse(progress.last_full_completed_at) <=
+          Date.parse(cutoff)
+      ) {
+        return json(
+          {
+            ok: false,
+            error: 'Completed full synchronisation required.',
+          },
+          409
+        );
+      }
+    }
+
+    async function verifyActiveLock() {
+      if (!automatic) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from(PROGRESS_TABLE)
+        .select('locked_until')
+        .eq('source_environment', ENVIRONMENT)
+        .eq('sport_type', 'all')
+        .eq('sync_mode', 'full')
+        .eq('sync_stage', 'reconciling')
+        .eq('status', 'running')
+        .eq('cycle_id', cycleId!)
+        .eq('lock_token', lockToken!)
+        .maybeSingle();
+
+      if (
+        error ||
+        !data?.locked_until ||
+        Date.parse(data.locked_until) <= Date.now()
+      ) {
+        throw new Error(
+          'Reconciliation cycle lock is no longer valid.'
+        );
+      }
     }
 
     const { data: candidates, error: candidateError } =
@@ -217,6 +317,8 @@ export async function GET(request: NextRequest) {
       if (Date.now() - startedAt >= RUN_BUDGET_MS) {
         break;
       }
+
+      await verifyActiveLock();
 
       const ticketId = candidate.supplier_ticket_id;
 
@@ -312,6 +414,8 @@ export async function GET(request: NextRequest) {
         };
 
         if (apply) {
+          await verifyActiveLock();
+
           const checkedAt = new Date().toISOString();
 
           const { data: saved, error: saveError } =
@@ -369,10 +473,43 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    await verifyActiveLock();
+
+    const {
+      count: remainingCandidates,
+      error: remainingError,
+    } = await supabase
+      .from(TABLE)
+      .select('supplier_ticket_id', {
+        count: 'exact',
+        head: true,
+      })
+      .eq('source_environment', ENVIRONMENT)
+      .eq('ticket_status', 'available')
+      .gt('stock', 0)
+      .gt('net_rate', 0)
+      .lt('ticket_checked_at', cutoff);
+
+    if (
+      remainingError ||
+      remainingCandidates === null
+    ) {
+      throw new Error(
+        'Unable to verify remaining reconciliation candidates.'
+      );
+    }
+
+    const complete =
+      apply &&
+      unresolved === 0 &&
+      remainingCandidates === 0;
+
     return json(
       {
         ok: unresolved === 0,
         mode: 'missing_ticket_reconciliation',
+        automatic,
+        cycleId: automatic ? cycleId : null,
         dryRun: !apply,
         cutoff,
         candidatesFound: candidates.length,
@@ -383,6 +520,8 @@ export async function GET(request: NextRequest) {
         stillAvailable,
         unresolved,
         concurrentChanges,
+        remainingCandidates,
+        complete,
         databaseModified: updated > 0,
         results,
         durationMs: Date.now() - startedAt,
@@ -390,10 +529,19 @@ export async function GET(request: NextRequest) {
       },
       unresolved > 0 ? 503 : 200
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      '[XS2Event ticket reconciliation]',
+      error instanceof Error
+        ? error.message
+        : 'Unknown reconciliation error.'
+    );
+
     return json(
       {
         ok: false,
+        automatic,
+        complete: false,
         error: 'Missing-ticket reconciliation failed.',
       },
       503
