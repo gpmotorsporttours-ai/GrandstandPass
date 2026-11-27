@@ -13,6 +13,7 @@ const DEFAULT_SPORT = 'all';
 const TABLE = 'xs2event_ticket_sync_progress';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const FULL_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LOCK_DURATION_MS = 120 * 1000;
 const REQUEST_TIMEOUT_MS = 65 * 1000;
 const RUN_BUDGET_MS = 15 * 1000;
@@ -26,6 +27,7 @@ type ProgressRow = {
   source_environment: string;
   sport_type: string;
   sync_mode: SyncMode;
+  sync_stage: 'fetching' | 'reconciling';
   status: string;
   next_page: number;
   since_date: string | null;
@@ -425,9 +427,9 @@ export async function GET(
 
     if (
       row.status === 'completed' &&
-      row.last_completed_at &&
+      row.cycle_started_at &&
       now - Date.parse(
-        row.last_completed_at
+        row.cycle_started_at
       ) < REFRESH_INTERVAL_MS
     ) {
       return json(requestedSport, {
@@ -464,10 +466,15 @@ export async function GET(
     }
 
     const mode: SyncMode = newCycle
-      ? row.last_full_completed_at
-        ? 'incremental'
-        : 'full'
+      ? (!row.last_full_completed_at || now - Date.parse(row.last_full_completed_at) >= FULL_INTERVAL_MS)
+        ? 'full'
+        : 'incremental'
       : row.sync_mode;
+
+    let stage = newCycle ? 'fetching' : row.sync_stage;
+    if (stage !== 'fetching' && (stage !== 'reconciling' || mode !== 'full')) {
+      throw new Error('Invalid synchronisation stage.');
+    }
 
     const sinceDate =
       mode === 'incremental'
@@ -525,6 +532,7 @@ export async function GET(
       .update({
         status: 'running',
         sync_mode: mode,
+        sync_stage: stage,
         since_date: sinceDate,
         cycle_id: cycleId,
         cycle_started_at: cycleStartedAt,
@@ -585,6 +593,7 @@ export async function GET(
 
     try {
       while (
+        stage === 'fetching' &&
         runPagesProcessed <
           MAX_PAGES_PER_RUN &&
         Date.now() - runStartedAt <
@@ -626,9 +635,10 @@ export async function GET(
 
         const progressUpdate:
           Record<string, unknown> = {
-            status: batch.complete
+            status: batch.complete && mode === 'incremental'
               ? 'completed'
               : 'running',
+            sync_stage: batch.complete && mode === 'full' ? 'reconciling' : 'fetching',
 
             next_page: nextPage,
 
@@ -658,7 +668,7 @@ export async function GET(
             updated_at: finishedAt,
           };
 
-        if (batch.complete) {
+        if (batch.complete && mode === 'incremental') {
           progressUpdate.last_completed_at =
             finishedAt;
 
@@ -669,13 +679,8 @@ export async function GET(
 
           progressUpdate.locked_until = null;
 
-          if (mode === 'full') {
-            progressUpdate.last_full_completed_at =
-              finishedAt;
-          } else {
-            progressUpdate.last_incremental_completed_at =
-              finishedAt;
-          }
+          progressUpdate.last_incremental_completed_at =
+            finishedAt;
         }
 
         const {
@@ -734,14 +739,73 @@ export async function GET(
 
         page = nextPage;
 
-        complete = batch.complete;
+        if (batch.complete && mode === 'full') stage = 'reconciling';
+        complete = batch.complete && mode === 'incremental';
 
-        if (complete) {
+        if (batch.complete) {
           break;
         }
       }
 
-      if (!complete) {
+      let reconciliation: Record<string, unknown> | null = null;
+      if (stage === 'reconciling' && runPagesProcessed === 0) {
+        const host = process.env.VERCEL_URL;
+        if (!host || !/^[a-z0-9.-]+\.vercel\.app$/i.test(host)) {
+          throw new Error('Preview deployment URL unavailable.');
+        }
+        const url = new URL('/api/xs2event-ticket-sync/reconcile', `https://${host}`);
+        url.searchParams.set('cutoff', cycleStartedAt);
+        url.searchParams.set('apply', 'true');
+        url.searchParams.set('automatic', 'true');
+        url.searchParams.set('cycleId', cycleId);
+        const headers: Record<string, string> = {
+          Authorization: `Bearer ${process.env.CRON_SECRET}`,
+          Accept: 'application/json',
+          'x-sync-lock-token': lockToken,
+        };
+        const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET || request.headers.get('x-vercel-protection-bypass');
+        if (bypass) headers['x-vercel-protection-bypass'] = bypass;
+        const response = await fetch(url, {
+          method: 'GET', headers, cache: 'no-store', redirect: 'error',
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (!response.ok) throw new Error(`Reconciliation returned HTTP ${response.status}.`);
+        const result = await response.json();
+        if (result.ok !== true || result.dryRun !== false ||
+            result.automatic !== true || result.cycleId !== cycleId ||
+            result.mode !== 'missing_ticket_reconciliation' ||
+            typeof result.cutoff !== 'string' || Date.parse(result.cutoff) !== Date.parse(cycleStartedAt) ||
+            result.testMode !== true || result.supplierEnvironment !== ENVIRONMENT ||
+            result.customerOrdersModified !== false || result.supplierReservationsCreated !== false ||
+            result.supplierOrdersCreated !== false || result.unresolved !== 0 ||
+            result.concurrentChanges !== 0 || !nonNegativeInteger(result.remainingCandidates) ||
+            typeof result.complete !== 'boolean' || result.complete !== (result.remainingCandidates === 0)) {
+          throw new Error('Unexpected or unsafe reconciliation response.');
+        }
+        reconciliation = result;
+        const finishedAt = new Date().toISOString();
+        const patch: Record<string, unknown> = {
+          status: result.complete ? 'completed' : 'pending',
+          sync_stage: result.complete ? 'fetching' : 'reconciling',
+          consecutive_failures: 0, last_error: null, next_retry_at: null,
+          last_batch_at: finishedAt, updated_at: finishedAt,
+          lock_token: null, locked_until: null,
+        };
+        if (result.complete) {
+          patch.last_completed_at = finishedAt;
+          patch.last_full_completed_at = finishedAt;
+          patch.last_successful_watermark = cycleStartedAt;
+        }
+        const { data: saved, error: saveError } = await supabase.from(TABLE)
+          .update(patch).eq('source_environment', ENVIRONMENT)
+          .eq('sport_type', requestedSport).eq('lock_token', lockToken)
+          .select('sport_type').maybeSingle();
+        if (saveError || !saved) throw new Error('Unable to save reconciliation progress.');
+        complete = result.complete;
+        if (complete) stage = 'fetching';
+      }
+
+      if (!complete && reconciliation === null) {
         const {
           data: released,
           error: releaseError,
@@ -776,6 +840,8 @@ export async function GET(
         mode: 'ticket_sync_controller',
 
         syncMode: mode,
+        syncStage: stage,
+        reconciliation,
 
         status: complete
           ? 'completed'
@@ -815,7 +881,7 @@ export async function GET(
 
         totalSupplierRecords,
 
-        nextPage: complete
+        nextPage: complete || stage === 'reconciling'
           ? null
           : page,
 
